@@ -7,9 +7,14 @@ def main():
 
     # Uncomment this to pass the first stage
     #
-    server_socket = socket.create_server(("localhost", 6379), reuse_port=True)
-    server_socket.accept() # wait for client
-
+    # server_socket = socket.create_server(("localhost", 6379), reuse_port=True)
+    # server_socket.accept() # wait for client
+    # connection = server_socket.accept()
+    # connection.sendall()
+    with socket.create_connection(("localhost", 6379)) as server:
+        client, addr  = server.accept()
+        client.sendall(b"+PONG\r\n")
+    # with socket.creat
 
 if __name__ == "__main__":
     main()
