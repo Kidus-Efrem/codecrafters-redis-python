@@ -10,10 +10,10 @@ def main():
     server_socket = socket.create_server(("localhost", 6379), reuse_port=True)
     # server_socket.accept() # wait for client
     connection, addr = server_socket.accept()
-    while connection:
+    while True:
         data = connection.recv(1024)
-        message = data.decode().split('\n')
-        for m in message:
+        message = data.decode().strip()
+        if message.upper== "PING" :
             connection.sendall(b"+PONG\r\n")
     # with socket.create_connection(("localhost", 6379)) as server:
     #     client, addr  = server.accept()
