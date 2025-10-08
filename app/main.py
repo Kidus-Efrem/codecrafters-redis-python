@@ -10,14 +10,14 @@ async def handle_command(reader: asyncio.StreamReader, writer: asyncio.StreamWri
         i = 0
         if chunk[i] == ord('*'):
             i+=1
-            j = chunk.find('\r\n', i)
+            j = chunk.find(b'\r\n', i)
             arrlen = int(chunk[i:j])
         i = j+2
         elements = []
         for _ in range(arrlen):
             if chunk[i] == ord('$'):
                 i+=1
-                j = chunk.find('\r\n', i)
+                j = chunk.find(b'\r\n', i)
                 wlen = int(chunk[i:j])
                 i = j+2
                 element = chunk[i:i+wlen]
