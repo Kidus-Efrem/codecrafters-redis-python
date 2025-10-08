@@ -34,7 +34,7 @@ async def handle_command(reader: asyncio.StreamReader, writer: asyncio.StreamWri
             writer.write(b"+PONG\r\n")
         if elements[0].lower() == 'set':
             d[element[1]] =elements[2]
-            writer.write(b"OK\r\n")
+            writer.write(b"$2\r\nOK\r\n")
         if elements[0].lower() =='get':
             if word:= elements[1] in d:
                 writer.write(b'$' + str(len(word).encode() + b"\r\n"))
