@@ -37,7 +37,7 @@ async def handle_command(reader: asyncio.StreamReader, writer: asyncio.StreamWri
             writer.write(b"$2\r\nOK\r\n")
         if elements[0].lower() =='get':
             if word:= elements[1] in d:
-                writer.write(b'$' + str(len(word).encode()+ b'\r\n'+word.encode() + b"\r\n"))
+                writer.write(b'$' + str(len(word)).encode()+ b'\r\n'+word.encode() + b"\r\n")
             else:
                 writer.write(b"$-1\r\n")
         await writer.drain()
