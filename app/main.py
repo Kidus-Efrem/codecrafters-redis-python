@@ -4,6 +4,7 @@ from collections import defaultdict
 BUF_SIZE = 4096
 
 async def handle_command(reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
+    lst = []
     d = defaultdict(str)
     while True:
         chunk = await reader.read(BUF_SIZE)
@@ -51,6 +52,9 @@ async def handle_command(reader: asyncio.StreamReader, writer: asyncio.StreamWri
                 writer.write(b'$' + str(len(d[elements[1]][0])).encode()+ b'\r\n'+d[elements[1]][0].encode() + b"\r\n")
             else:
                 writer.write(b"$-1\r\n")
+        if elements[0].lower() == 'rpush':
+            lst.append(elements[1])
+            writer.write(b'$1\r\n'+ str(len(lst)).encode()+b'\r\n')
         await writer.drain()
     writer.close()
     await writer.wait_closed()
