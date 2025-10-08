@@ -53,7 +53,7 @@ async def handle_command(reader: asyncio.StreamReader, writer: asyncio.StreamWri
                 writer.write(b"$-1\r\n")
         await writer.drain()
     writer.close()
-    await writer.wait_closed()
+    await writer.wait_closed() 
 
 async def main():
     server = await asyncio.start_server(handle_command, "localhost", 6379)
