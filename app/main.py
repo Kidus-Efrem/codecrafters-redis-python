@@ -1,4 +1,5 @@
 import asyncio
+import time
 from collections import defaultdict
 BUF_SIZE = 4096
 
@@ -33,10 +34,20 @@ async def handle_command(reader: asyncio.StreamReader, writer: asyncio.StreamWri
 
             writer.write(b"+PONG\r\n")
         if elements[0].lower() == 'set':
-            d[elements[1]] =elements[2]
+            addtime = float('inf')
+            if len(elements) >=4:
+                addtime = elements[4]
+                if elements[3] == 'PX':
+                    addtime =  elements[4]/1000
+
+
+            d[elements[1]] =(elements[2], time.time()+ addtime)
+
             writer.write(b"$2\r\nOK\r\n")
+
         if elements[0].lower() =='get':
-            if  elements[1] in d:
+
+            if  elements[1] in d and d[elements[1]] >= time.time():
                 writer.write(b'$' + str(len(d[elements[1]])).encode()+ b'\r\n'+d[elements[1]].encode() + b"\r\n")
             else:
                 writer.write(b"$-1\r\n")
