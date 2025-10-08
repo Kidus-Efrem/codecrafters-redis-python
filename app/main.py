@@ -1,8 +1,9 @@
 import asyncio
-
+from collections import defaultdict
 BUF_SIZE = 4096
 
 async def handle_command(reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
+    d = defaultdict(str)
     while True:
         chunk = await reader.read(BUF_SIZE)
         if not chunk:
@@ -31,6 +32,14 @@ async def handle_command(reader: asyncio.StreamReader, writer: asyncio.StreamWri
             # writer.write(b''++'\r\n')
 
             writer.write(b"+PONG\r\n")
+        if elements[0].lower() == 'set':
+            d[element[1]] =elements[2]
+            writer.write(b"OK\r\n")
+        if elements[0].lower() =='get':
+            if word:= elements[1] in d:
+                writer.write(b'$' + str(len(word).encode() + b"\r\n"))
+            else:
+                writer.write(b"$-1\r\n")
         await writer.drain()
     writer.close()
     await writer.wait_closed()
