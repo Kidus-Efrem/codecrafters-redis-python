@@ -36,9 +36,9 @@ async def handle_command(reader: asyncio.StreamReader, writer: asyncio.StreamWri
         if elements[0].lower() == 'set':
             addtime = float('inf')
             if len(elements) >=4:
-                addtime = elements[4]
+                addtime = int(elements[4])
                 if elements[3] == 'PX':
-                    addtime =  elements[4]/1000
+                    addtime =  int(elements[4])/1000
 
 
             d[elements[1]] =(elements[2], time.time()+ addtime)
@@ -53,7 +53,7 @@ async def handle_command(reader: asyncio.StreamReader, writer: asyncio.StreamWri
                 writer.write(b"$-1\r\n")
         await writer.drain()
     writer.close()
-    await writer.wait_closed() 
+    await writer.wait_closed()
 
 async def main():
     server = await asyncio.start_server(handle_command, "localhost", 6379)
