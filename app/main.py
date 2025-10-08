@@ -24,9 +24,9 @@ async def handle_command(reader: asyncio.StreamReader, writer: asyncio.StreamWri
                 i+= wlen+2
                 elements.append(element.decode())
         print(elements)
-        if element[0].lower() == 'echo':
+        if elements[0].lower() == 'echo':
             writer.write(b''+elements[1]+'\r\n')
-        if element[0].lower() == 'ping':
+        if elements[0].lower() == 'ping':
             writer.write(b''+elements[1]+'\r\n')
 
         # writer.write(b"+PONG\r\n")
