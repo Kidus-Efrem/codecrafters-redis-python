@@ -55,7 +55,7 @@ async def handle_command(reader: asyncio.StreamReader, writer: asyncio.StreamWri
         if elements[0].lower() == 'rpush':
             i = 1
             while i < len(elements):
-                lst.append(elements[1])
+                lst.append(elements[i])
                 i+=1
             writer.write(b':'+ str(len(lst)).encode()+b'\r\n')
         await writer.drain()
