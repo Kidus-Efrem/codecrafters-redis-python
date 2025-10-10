@@ -2,10 +2,10 @@ import asyncio
 import time
 from collections import defaultdict, deque
 BUF_SIZE = 4096
+remove = defaultdict(deque)
 
 async def handle_command(reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
     lst = defaultdict(list)
-    remove = defaultdict(deque)
 
     d = defaultdict(str)
     while True:
