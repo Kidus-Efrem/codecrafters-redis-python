@@ -83,7 +83,7 @@ async def handle_command(reader: asyncio.StreamReader, writer: asyncio.StreamWri
             else:
                 writer.write(b'*0\r\n')
         if elements[0].lower() == 'llen':
-            writer.write(b':' + len(lst[elements[1]]).encode()+ b'\r\n')
+            writer.write(b':' + str(len(lst[elements[1]])).encode()+ b'\r\n')
         await writer.drain()
     writer.close()
     await writer.wait_closed()
