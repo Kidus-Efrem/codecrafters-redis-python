@@ -87,12 +87,12 @@ async def handle_command(reader: asyncio.StreamReader, writer: asyncio.StreamWri
         if elements[0].lower() == 'lpop':
             if len(lst[elements[1]]):
                 temp  = lst[elements[1]].pop()
-                writer.write(b':' + str(temp).encode()+ b'\r\n')
+                writer.write(b'$'+str(len(temp)).encode()+ b'\r\n' + str(temp).encode()+ b'\r\n')
             else:
                 writer.write(b'$-1\r\n')
         await writer.drain()
     writer.close()
-    await writer.wait_closed() 
+    await writer.wait_closed()
 
 async def main():
     server = await asyncio.start_server(handle_command, "localhost", 6379)
