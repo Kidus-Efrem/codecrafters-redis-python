@@ -141,7 +141,6 @@ async def handle_command(reader: asyncio.StreamReader, writer: asyncio.StreamWri
     await writer.wait_closed()
 
 async def main():
-    print(remove)
 
     server = await asyncio.start_server(handle_command, "localhost", 6379)
     async with server:
