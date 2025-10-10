@@ -3,48 +3,44 @@ from collections import defaultdict, deque
 
 data = defaultdict(deque)
 blocked_clients = defaultdict(list)
-BUF_SIZE = 4096
 
-# ---------------- RESP ENCODING HELPERS ----------------
-def encode_bulk_string(s: str) -> bytes:
-    return b"$" + str(len(s)).encode() + b"\r\n" + s.encode() + b"\r\n"
+# --- RESP Encoding Helpers ---
+def encode_bulk(value: str) -> bytes:
+    if value is None:
+        return b"$-1\r\n"
+    return b"$" + str(len(value)).encode() + b"\r\n" + value.encode() + b"\r\n"
 
-def encode_array(arr: list[str]) -> bytes:
-    res = b"*" + str(len(arr)).encode() + b"\r\n"
-    for a in arr:
-        res += encode_bulk_string(a)
-    return res
+def encode_array(values: list[str]) -> bytes:
+    out = b"*" + str(len(values)).encode() + b"\r\n"
+    for v in values:
+        out += encode_bulk(v)
+    return out
 
-def encode_integer(i: int) -> bytes:
-    return b":" + str(i).encode() + b"\r\n"
+def encode_integer(num: int) -> bytes:
+    return b":" + str(num).encode() + b"\r\n"
 
-# ---------------- RESP PARSING ----------------
-def parse_resp(raw: bytes):
-    """Simplified RESP parser that safely extracts command and args."""
-    lines = [l for l in raw.split(b"\r\n") if l]
-    arr = []
-    for line in lines:
-        if line.startswith(b"*") or line.startswith(b"$"):
-            continue
-        arr.append(line.decode())
-    return arr
-
-# ---------------- MAIN HANDLER ----------------
-async def handle_command(reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
+# --- Core Logic ---
+async def handle_client(reader, writer):
     addr = writer.get_extra_info("peername")
-    while True:
-        try:
-            raw = await reader.read(BUF_SIZE)
-            if not raw:
+    try:
+        while True:
+            line = await reader.readline()
+            if not line:
                 break
-
-            parts = parse_resp(raw)
-            if not parts:
+            try:
+                count = int(line.strip()[1:])
+            except Exception:
                 continue
+            parts = []
+            for _ in range(count):
+                length_line = await reader.readline()
+                length = int(length_line.strip()[1:])
+                arg = (await reader.readexactly(length + 2))[:-2].decode()
+                parts.append(arg)
 
             cmd = parts[0].upper()
 
-            # RPUSH key value [value ...]
+            # --- RPUSH ---
             if cmd == "RPUSH":
                 if len(parts) < 3:
                     continue
@@ -53,7 +49,10 @@ async def handle_command(reader: asyncio.StreamReader, writer: asyncio.StreamWri
                 for v in vals:
                     data[key].append(v)
 
-                # Unblock one waiting BLPOP client
+                # ✅ Get length BEFORE unblocking
+                list_len = len(data[key])
+
+                # ✅ Unblock a waiting BLPOP client if present
                 if key in blocked_clients and blocked_clients[key]:
                     waiting_writer = blocked_clients[key].pop(0)
                     val = data[key].popleft()
@@ -61,40 +60,32 @@ async def handle_command(reader: asyncio.StreamReader, writer: asyncio.StreamWri
                     waiting_writer.write(resp)
                     await waiting_writer.drain()
 
-                writer.write(encode_integer(len(data[key])))
+                # ✅ Return correct list length
+                writer.write(encode_integer(list_len))
                 await writer.drain()
 
-            # LPOP key [count]
+            # --- LPOP ---
             elif cmd == "LPOP":
-                if len(parts) < 2:
-                    continue
                 key = parts[1]
-                count = 1
-                if len(parts) > 2:
-                    try:
-                        count = int(parts[2])
-                    except:
-                        pass
-
-                popped = []
+                count = int(parts[2]) if len(parts) > 2 else 1
+                result = []
                 for _ in range(count):
-                    if data[key]:
-                        popped.append(data[key].popleft())
-                    else:
+                    if not data[key]:
                         break
+                    result.append(data[key].popleft())
 
-                if not popped:
+                if len(result) == 0:
                     writer.write(b"$-1\r\n")
-                elif len(popped) == 1:
-                    writer.write(encode_bulk_string(popped[0]))
+                elif len(result) == 1 and (len(parts) == 2):
+                    # Single element → bulk string
+                    writer.write(encode_bulk(result[0]))
                 else:
-                    writer.write(encode_array(popped))
+                    # Multiple elements → array
+                    writer.write(encode_array(result))
                 await writer.drain()
 
-            # BLPOP key timeout
+            # --- BLPOP ---
             elif cmd == "BLPOP":
-                if len(parts) < 3:
-                    continue
                 key = parts[1]
                 timeout = int(parts[2])
                 if data[key]:
@@ -102,44 +93,24 @@ async def handle_command(reader: asyncio.StreamReader, writer: asyncio.StreamWri
                     writer.write(encode_array([key, val]))
                     await writer.drain()
                 else:
-                    # Add to blocking queue
+                    # Block client
                     blocked_clients[key].append(writer)
-                    # Don't respond yet — RPUSH will handle
 
-            # LRANGE key start end
-            elif cmd == "LRANGE":
-                if len(parts) < 4:
-                    continue
-                key = parts[1]
-                start = int(parts[2])
-                end = int(parts[3])
-                lst = list(data[key])
-
-                n = len(lst)
-                if end == -1:
-                    end = n - 1
-                if start < 0:
-                    start = n + start
-                if end < 0:
-                    end = n + end
-                start = max(0, start)
-                end = min(n - 1, end)
-                if start > end or n == 0:
-                    res = []
-                else:
-                    res = lst[start:end + 1]
-
-                writer.write(encode_array(res))
+            else:
+                # Unsupported command
+                writer.write(b"-ERR unknown command\r\n")
                 await writer.drain()
 
-        except Exception as e:
-            print(f"[{addr}] Error: {e}")
-            break
+    except Exception as e:
+        print("[your_program] Error:", e)
+    finally:
+        writer.close()
+        await writer.wait_closed()
 
-# ---------------- SERVER ENTRYPOINT ----------------
+# --- Main ---
 async def main():
-    server = await asyncio.start_server(handle_command, "127.0.0.1", 6379)
-    print("Redis clone running on port 6379...")
+    server = await asyncio.start_server(handle_client, "127.0.0.1", 6379)
+    print("[your_program] Redis clone running on port 6379...")
     async with server:
         await server.serve_forever()
 
