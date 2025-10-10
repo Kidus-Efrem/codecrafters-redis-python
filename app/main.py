@@ -129,7 +129,7 @@ async def handle_command(reader: asyncio.StreamReader, writer: asyncio.StreamWri
                     writer.write(b'added one element')
                 else:
                     remove[elements[1]].appendleft(int(elements[2]))
-                    writer.write(b'added one element: '+ remove[elements[1]][-1].encode)
+                    writer.write(b'added one element: '+ remove[elements[1]][-1].encode())
 
 
 
