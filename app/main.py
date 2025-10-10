@@ -7,7 +7,7 @@ remove = defaultdict(deque)
 async def handle_command(reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
     lst = defaultdict(list)
 
-    conditions = defaultdict(asyncio.conditions)
+    conditions = defaultdict(asyncio.Condition)
     while True:
         chunk = await reader.read(BUF_SIZE)
         if not chunk:
