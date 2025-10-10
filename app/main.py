@@ -118,13 +118,13 @@ async def handle_command(reader: asyncio.StreamReader, writer: asyncio.StreamWri
             key = elements[1]
             timeout = int(elements[2])
             async with conditions[key]:
-                if len(lst[key]) > 0:
+                while not lst[key]:
                     try:
                         await asyncio.wait_for(conditions[key].wait(), timeout)
                     except asyncio.TimeoutError:
                         writer.write(b'$-1\r\n')
                         await writer.drain()
-                        continue
+                        break
 
                 if len(lst[key]) > 0:
                     tmep = lst[key].pop(0)
