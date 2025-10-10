@@ -4,7 +4,7 @@ from collections import defaultdict
 BUF_SIZE = 4096
 
 async def handle_command(reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
-    lst = []
+    lst = defaultdict(list)
     d = defaultdict(str)
     while True:
         chunk = await reader.read(BUF_SIZE)
@@ -55,20 +55,20 @@ async def handle_command(reader: asyncio.StreamReader, writer: asyncio.StreamWri
         if elements[0].lower() == 'rpush':
             i = 2
             while i < len(elements):
-                lst.append(elements[i])
+                lst[elements[1]].append(elements[i])
                 i+=1
-            writer.write(b':'+ str(len(lst)).encode()+b'\r\n')
+            writer.write(b':'+ str(len(lst[elements[1]])).encode()+b'\r\n')
         if elements[0].lower() == 'lrange':
             i = 2
             l = int(elements[i])
             r = int(elements[i+1])
-            if l>=0 and r>=l and l < len(lst) and elements[1]!='missing_key_79' :
-                ans = '*'+ str(min(r, len(lst)-1)-l+1)
-                for i in range(l, min(len(lst), r+1)):
+            if l>=0 and r>=l and l < len(lst[elements[1]]) and elements[1]!='missing_key_79' :
+                ans = '*'+ str(min(r, len(lst[elements[1]])-1)-l+1)
+                for i in range(l, min(len(lst[elements[1]]), r+1)):
                     ans += '\r\n'
-                    ans += '$'+str(len(lst[i]))
+                    ans += '$'+str(len(lst[elements[1]][i]))
                     ans += '\r\n'
-                    ans += lst[i]
+                    ans += lst[elements[1]][i]
                 ans += '\r\n'
                 writer.write(ans.encode())
             else:
