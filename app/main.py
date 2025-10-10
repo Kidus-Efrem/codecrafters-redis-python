@@ -66,7 +66,7 @@ async def handle_command(reader: asyncio.StreamReader, writer: asyncio.StreamWri
                 ans = '*'+ str(min(r, len(elements)))
                 for i in range(l, min(len(elements), r+1)):
                     ans += '\r\n'
-                    ans += '$'+len(elements[i])
+                    ans += '$'+str(len(elements[i]))
                     ans += '\r\n'
                     ans ++ elements[i]
                 ans += '\r\n'
