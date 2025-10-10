@@ -59,10 +59,11 @@ async def handle_command(reader: asyncio.StreamReader, writer: asyncio.StreamWri
                 lst[elements[1]].append(elements[i])
                 i+=1
             writer.write(b':'+ str(len(lst[elements[1]])).encode()+b'\r\n')
+            writer.write(b'oustide loop'+ remove[elements[1]][-1].encode())
+
             while len(remove[elements[1]])> 0:
-                writer.write(b'inside loop')
                 cur = remove[elements[1]].pop()
-                if cur == 0 or cur <= time.time() :
+                if cur == '0' or cur <= time.time() :
                     temp  = lst[elements[1]][0]
                     lst[elements[1]] =  lst[elements[1]][1:]
                     writer.write(b'*2\r\n'+b'$'+ str(len(elements[1])).encode()+b'\r\n'+elements[1].encode()+b'\r\n'+b'$'+str(len(temp)).encode()+ b'\r\n' + str(temp).encode()+ b'\r\n')
