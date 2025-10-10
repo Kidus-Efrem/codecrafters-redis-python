@@ -3,10 +3,8 @@ import time
 from collections import defaultdict, deque
 
 BUF_SIZE = 4096
-
-# Data stores
-d = {}  # key -> (value, expire_time)
-lst = defaultdict(list)  # key -> list
+lst = defaultdict(list)
+d = defaultdict(tuple)
 conditions = defaultdict(asyncio.Condition)
 
 async def handle_command(reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
@@ -20,7 +18,7 @@ async def handle_command(reader: asyncio.StreamReader, writer: asyncio.StreamWri
             i += 1
             j = chunk.find(b'\r\n', i)
             arrlen = int(chunk[i:j])
-            i = j + 2
+        i = j + 2
 
         elements = []
         for _ in range(arrlen):
@@ -29,68 +27,58 @@ async def handle_command(reader: asyncio.StreamReader, writer: asyncio.StreamWri
                 j = chunk.find(b'\r\n', i)
                 wlen = int(chunk[i:j])
                 i = j + 2
-                element = chunk[i:i+wlen]
+                element = chunk[i:i + wlen]
                 i += wlen + 2
                 elements.append(element.decode())
 
+        if not elements:
+            continue
+
         cmd = elements[0].lower()
 
-        # ECHO
-        if cmd == 'echo':
+        if cmd == 'echo' and len(elements) >= 2:
             writer.write(b"$" + str(len(elements[1])).encode() + b"\r\n" + elements[1].encode() + b"\r\n")
 
-        # PING
         elif cmd == 'ping':
             writer.write(b"+PONG\r\n")
 
-        # SET
-        elif cmd == 'set':
+        elif cmd == 'set' and len(elements) >= 3:
             addtime = float('inf')
-            if len(elements) >= 4:
-                if len(elements) >= 5:
-                    addtime = int(elements[4])
-                    if elements[3].upper() == 'PX':
-                        addtime = addtime / 1000
+            if len(elements) >= 5 and elements[3].upper() == 'PX':
+                addtime = int(elements[4]) / 1000
+            elif len(elements) >= 5:
+                addtime = int(elements[4])
             d[elements[1]] = (elements[2], time.time() + addtime)
             writer.write(b"$2\r\nOK\r\n")
 
-        # GET
-        elif cmd == 'get':
-            if elements[1] in d and d[elements[1]][1] >= time.time():
-                writer.write(b'$' + str(len(d[elements[1]][0])).encode() + b'\r\n' + d[elements[1]][0].encode() + b'\r\n')
+        elif cmd == 'get' and len(elements) >= 2:
+            key = elements[1]
+            if key in d and d[key][1] >= time.time():
+                val = d[key][0]
+                writer.write(b'$' + str(len(val)).encode() + b'\r\n' + val.encode() + b'\r\n')
             else:
                 writer.write(b"$-1\r\n")
 
-        # RPUSH
-        elif cmd == 'rpush':
+        elif cmd == 'rpush' and len(elements) >= 3:
             key = elements[1]
-            for v in elements[2:]:
-                lst[key].append(v)
+            for val in elements[2:]:
+                lst[key].append(val)
             writer.write(b':' + str(len(lst[key])).encode() + b'\r\n')
-
-            # Notify any waiting BLPOP
             async with conditions[key]:
                 conditions[key].notify_all()
 
-        # LPUSH
-        elif cmd == 'lpush':
+        elif cmd == 'lpush' and len(elements) >= 3:
             key = elements[1]
-            for v in reversed(elements[2:]):
-                lst[key] = [v] + lst[key]
+            for val in reversed(elements[2:]):
+                lst[key].insert(0, val)
             writer.write(b':' + str(len(lst[key])).encode() + b'\r\n')
 
-        # LLEN
-        elif cmd == 'llen':
-            writer.write(b':' + str(len(lst[elements[1]])).encode() + b'\r\n')
-
-        # LPOP
-        elif cmd == 'lpop':
+        elif cmd == 'lrange' and len(elements) >= 4:
             key = elements[1]
-            count = int(elements[2]) if len(elements) >= 3 else 1
-
-            if lst[key]:
-                arr = lst[key][:count]
-                lst[key] = lst[key][count:]
+            l = int(elements[2])
+            r = int(elements[3])
+            arr = lst[key][l:r + 1] if r >= 0 else lst[key][l:r + 1]
+            if arr:
                 ans = '*' + str(len(arr))
                 for a in arr:
                     ans += '\r\n$' + str(len(a)) + '\r\n' + a
@@ -99,8 +87,28 @@ async def handle_command(reader: asyncio.StreamReader, writer: asyncio.StreamWri
             else:
                 writer.write(b'*0\r\n')
 
-        # BLPOP
-        elif cmd == 'blpop':
+        elif cmd == 'llen' and len(elements) >= 2:
+            writer.write(b':' + str(len(lst[elements[1]])).encode() + b'\r\n')
+
+        elif cmd == 'lpop' and len(elements) >= 2:
+            key = elements[1]
+            count = int(elements[2]) if len(elements) >= 3 else 1
+            if not lst[key]:
+                writer.write(b'$-1\r\n')
+            else:
+                if count == 1:
+                    temp = lst[key].pop(0)
+                    writer.write(b'$' + str(len(temp)).encode() + b'\r\n' + temp.encode() + b'\r\n')
+                else:
+                    arr = lst[key][:count]
+                    lst[key] = lst[key][count:]
+                    ans = '*' + str(len(arr))
+                    for a in arr:
+                        ans += '\r\n$' + str(len(a)) + '\r\n' + a
+                    ans += '\r\n'
+                    writer.write(ans.encode())
+
+        elif cmd == 'blpop' and len(elements) >= 3:
             key = elements[1]
             timeout = int(elements[2])
             async with conditions[key]:
@@ -114,7 +122,6 @@ async def handle_command(reader: asyncio.StreamReader, writer: asyncio.StreamWri
                         await asyncio.wait_for(conditions[key].wait(), remaining if timeout != 0 else None)
                     except asyncio.TimeoutError:
                         break
-
                 if lst[key]:
                     temp = lst[key].pop(0)
                     writer.write(
@@ -124,34 +131,6 @@ async def handle_command(reader: asyncio.StreamReader, writer: asyncio.StreamWri
                     )
                 else:
                     writer.write(b'$-1\r\n')
-
-        # LRANGE
-        elif cmd == 'lrange':
-            key = elements[1]
-            l = int(elements[2])
-            r = int(elements[3])
-            lst_len = len(lst[key])
-
-            # Handle negative indices
-            if l < 0:
-                l += lst_len
-            if r < 0:
-                r += lst_len
-
-            # Clamp
-            l = max(l, 0)
-            r = min(r, lst_len - 1)
-
-            if l > r or lst_len == 0:
-                arr = []
-            else:
-                arr = lst[key][l:r + 1]
-
-            ans = '*' + str(len(arr))
-            for a in arr:
-                ans += '\r\n$' + str(len(a)) + '\r\n' + a
-            ans += '\r\n'
-            writer.write(ans.encode())
 
         await writer.drain()
 
