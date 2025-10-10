@@ -2,10 +2,11 @@ import asyncio
 import time
 from collections import defaultdict, deque
 BUF_SIZE = 4096
-remove = defaultdict(deque)
 
 async def handle_command(reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
     lst = defaultdict(list)
+    remove = defaultdict(deque)
+
     d = defaultdict(str)
     while True:
         chunk = await reader.read(BUF_SIZE)
@@ -59,7 +60,7 @@ async def handle_command(reader: asyncio.StreamReader, writer: asyncio.StreamWri
                 lst[elements[1]].append(elements[i])
                 i+=1
             writer.write(b':'+ str(len(lst[elements[1]])).encode()+b'\r\n')
-            writer.write('oustide loop'+ remove[elements[1]])
+            writer.write(b'oustide loop'+ remove[elements[1]][-1].encode())
 
             while len(remove[elements[1]])> 0:
                 cur = remove[elements[1]].pop()
