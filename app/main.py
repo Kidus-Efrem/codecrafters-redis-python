@@ -62,13 +62,13 @@ async def handle_command(reader: asyncio.StreamReader, writer: asyncio.StreamWri
             i = 2
             l = int(elements[i])
             r = int(elements[i+1])
-            if l>=0 and r>=l and l < len(elements):
-                ans = '*'+ str(min(r, len(elements))-l)
-                for i in range(l, min(len(elements), r+1)):
+            if l>=0 and r>=l and l < len(lst):
+                ans = '*'+ str(min(r, len(lst))-l)
+                for i in range(l, min(len(lst), r+1)):
                     ans += '\r\n'
-                    ans += '$'+str(len(elements[i]))
+                    ans += '$'+str(len(lst[i]))
                     ans += '\r\n'
-                    ans += elements[i]
+                    ans += lst[i]
                 ans += '\r\n'
                 writer.write(ans.encode())
             else:
