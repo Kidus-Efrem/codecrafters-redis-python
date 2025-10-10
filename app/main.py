@@ -58,22 +58,13 @@ async def handle_command(reader: asyncio.StreamReader, writer: asyncio.StreamWri
                 lst[elements[1]].append(elements[i])
                 i+=1
             writer.write(b':'+ str(len(lst[elements[1]])).encode()+b'\r\n')
-        # if elements[0].lower() == 'lrange':
-        #     i = 2
-        #     l = int(elements[i])
-        #     r = int(elements[i+1])
-        #     arr  ==[]
-        #     if l>=0 and r>=l and l < len(lst[elements[1]]) and elements[1]!='missing_key_79' :
-        #         ans = '*'+ str(min(r, len(lst[elements[1]])-1)-l+1)
-        #         for i in range(l, min(len(lst[elements[1]]), r+1)):
-        #             ans += '\r\n'
-        #             ans += '$'+str(len(lst[elements[1]][i]))
-        #             ans += '\r\n'
-        #             ans += lst[elements[1]][i]
-        #         ans += '\r\n'
-        #         writer.write(ans.encode())
-        #     else:
-        #         writer.write(b'*0\r\n')
+        if elements[0].lower() == 'lpush':
+            i = 2
+            while i < len(elements):
+                lst[elements[1]] = [elements[i]] + lst[elements[1]] 
+                i+=1
+            writer.write(b':'+ str(len(lst[elements[1]])).encode()+b'\r\n')
+
         if elements[0].lower() == 'lrange':
             i = 2
             l = int(elements[i])
