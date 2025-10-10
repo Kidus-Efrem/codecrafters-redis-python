@@ -79,7 +79,7 @@ async def handle_command(reader: asyncio.StreamReader, writer: asyncio.StreamWri
             l = int(elements[i])
             r = int(elements[i+1])
             arr  =lst[elements[1]][l:r]
-            arr+=([lst[elements[1]][r]] if arr and -1*len(lst[elements[1]])< r < len(lst[elements[1]][r]) else [])
+            arr+=([lst[elements[1]][r]] if arr and -1*len(lst[elements[1]])< r < len(lst[elements[1]]) else [])
             if arr:
                 ans = '*'+ str(len(arr))
                 for a in arr:

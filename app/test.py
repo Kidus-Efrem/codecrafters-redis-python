@@ -1,2 +1,2 @@
-arr = [ 'strawberry', 'apple', 'mango', 'pineapple', 'raspberry']
-print(arr[0:-2] )
+arr = [ 'orange', 'raspberry', 'grape', 'banana']
+print(arr[0:8] )
