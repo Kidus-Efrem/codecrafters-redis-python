@@ -60,7 +60,7 @@ async def handle_command(reader: asyncio.StreamReader, writer: asyncio.StreamWri
                 i+=1
             writer.write(b':'+ str(len(lst[elements[1]])).encode()+b'\r\n')
             while len(remove[elements[1]])> 0:
-                print("inside blpop")
+                writer.write(b'inside loop')
                 cur = remove[elements[1]].pop()
                 if cur == 0 or cur <= time.time() :
                     temp  = lst[elements[1]][0]
@@ -126,10 +126,10 @@ async def handle_command(reader: asyncio.StreamReader, writer: asyncio.StreamWri
             else:
                 if int(elements[2]):
                     remove[elements[1]].appendleft(time.time() + int(elements[2]))
-                    writer.write(b'added one element')
+                    # writer.write(b'added one element')
                 else:
                     remove[elements[1]].appendleft(elements[2])
-                    writer.write(b'added one element: '+ remove[elements[1]][-1].encode())
+                    # writer.write(b'added one element: '+ remove[elements[1]][-1].encode())
 
 
 
