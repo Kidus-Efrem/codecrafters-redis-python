@@ -86,7 +86,7 @@ async def handle_command(reader: asyncio.StreamReader, writer: asyncio.StreamWri
             writer.write(b':' + str(len(lst[elements[1]])).encode()+ b'\r\n')
         if elements[0].lower() == 'lpop':
             if len(lst[elements[1]]):
-                temp  = lst[elements[1]].pop()
+                temp  = lst[elements[1]][0]
                 writer.write(b'$'+str(len(temp)).encode()+ b'\r\n' + str(temp).encode()+ b'\r\n')
             else:
                 writer.write(b'$-1\r\n')
