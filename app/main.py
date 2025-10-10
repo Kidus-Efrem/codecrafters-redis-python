@@ -3,11 +3,11 @@ import time
 from collections import defaultdict, deque
 BUF_SIZE = 4096
 remove = defaultdict(deque)
+lst = defaultdict(list)
 
+conditions = defaultdict(asyncio.Condition)
 async def handle_command(reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
-    lst = defaultdict(list)
 
-    conditions = defaultdict(asyncio.Condition)
     while True:
         chunk = await reader.read(BUF_SIZE)
         if not chunk:
