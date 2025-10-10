@@ -7,7 +7,7 @@ remove = defaultdict(deque)
 async def handle_command(reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
     lst = defaultdict(list)
 
-    d = defaultdict(str)
+    conditions = defaultdict(asyncio.condition)
     while True:
         chunk = await reader.read(BUF_SIZE)
         if not chunk:
@@ -60,18 +60,11 @@ async def handle_command(reader: asyncio.StreamReader, writer: asyncio.StreamWri
                 lst[elements[1]].append(elements[i])
                 i+=1
             writer.write(b':'+ str(len(lst[elements[1]])).encode()+b'\r\n')
+            await writer.drain()
             # writer.write(b'oustide loop'+ remove[elements[1]][-1].encode())
 
-            while len(remove[elements[1]])> 0:
-                cur = remove[elements[1]].pop()
-                if cur == '0' or cur <= time.time() :
-                    temp  = lst[elements[1]][0]
-                    lst[elements[1]] =  lst[elements[1]][1:]
-                    writer.write(b'*2\r\n'+b'$'+ str(len(elements[1])).encode()+b'\r\n'+elements[1].encode()+b'\r\n'+b'$'+str(len(temp)).encode()+ b'\r\n' + str(temp).encode()+ b'\r\n')
-                else:
-                    writer.write("*-1\r\n")
- 
-
+            async with conditions[key]:
+                conditions[key].notify_all()
         if elements[0].lower() == 'lpush':
             i = 2
             while i < len(elements):
@@ -121,17 +114,25 @@ async def handle_command(reader: asyncio.StreamReader, writer: asyncio.StreamWri
             else:
                 writer.write(b'$-1\r\n')
         if elements[0].lower() == 'blpop':
-            if len(lst[elements[1]]) > 0:
-                temp  = lst[elements[1]][0]
-                lst[elements[1]] =  lst[elements[1]][1:]
-                writer.write(b'*2\r\n'+b'$'+ str(len(elements[1])).encode()+b'\r\n'+elements[1].encode()+b'\r\n'+b'$'+str(len(temp)).encode()+ b'\r\n' + str(temp).encode()+ b'\r\n')
-            else:
-                if int(elements[2]):
-                    remove[elements[1]].appendleft(time.time() + int(elements[2]))
-                    # writer.write(b'added one element')
-                else:
-                    remove[elements[1]].appendleft(elements[2])
-                    # writer.write(b'added one element: '+ remove[elements[1]][-1].encode())
+            key = elements[1]
+            timeout = int(elements[2])
+            async with conditions[key]:
+                if len(lst[key]) > 0:
+                    try:
+                        await asyncio.wait_for(conditions[key].wait(), timeout)
+                    except asyncio.TimeoutError:
+                        writer.write(b'$-1\r\n')
+                        await writer.drain()
+                        continue
+
+                if len(lst[key]) > 0:
+                    tmep = lst[key].pop(0)
+                    writer.writer(
+                    b'*2\r\n'
+                    + b'$' + str(len(key)).encode() + b'\r\n' + key.encode() + b'\r\n'
+                    + b'$' + str(len(temp)).encode() + b'\r\n' + temp.encode() + b'\r\n'
+
+                    )
 
 
 
