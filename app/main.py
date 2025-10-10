@@ -60,8 +60,8 @@ async def handle_command(reader: asyncio.StreamReader, writer: asyncio.StreamWri
             writer.write(b':'+ str(len(lst)).encode()+b'\r\n')
         if elements[0].lower() == 'lrange':
             i = 2
-            l = elements[i]
-            r = elements[i+1]
+            l = int(elements[i])
+            r = int(elements[i+1])
             if l>=0 and r>=l and l < len(elements):
                 ans = '*'+ str(min(r, len(elements)))
                 for i in range(l, min(len(elements), r+1)):
@@ -70,6 +70,7 @@ async def handle_command(reader: asyncio.StreamReader, writer: asyncio.StreamWri
                     ans += '\r\n'
                     ans ++ elements[i]
                 ans += '\r\n'
+                print(ans.encode())
             else:
                 print(b'*0\r\n')
         await writer.drain()
