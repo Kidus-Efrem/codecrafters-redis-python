@@ -85,7 +85,22 @@ async def handle_command(reader: asyncio.StreamReader, writer: asyncio.StreamWri
         if elements[0].lower() == 'llen':
             writer.write(b':' + str(len(lst[elements[1]])).encode()+ b'\r\n')
         if elements[0].lower() == 'lpop':
-            if len(lst[elements[1]]):
+            if len(elements) >=3:
+                arr  = lst[elements[1]][:elements[2]]
+                lst[elements[1]] =  lst[elements[1]][elements[2]:]
+                if arr:
+                    ans = '*'+ str(len(arr))
+                    for a in arr:
+                        ans+='\r\n'
+                        ans += '$'+str(len(a))
+                        ans += '\r\n'
+                        ans += a
+                    ans += '\r\n'
+                    writer.write(ans.encode())
+                else: writer.write(b'*0\r\n')
+
+
+            elif len(lst[elements[1]]):
                 temp  = lst[elements[1]][0]
                 lst[elements[1]] =  lst[elements[1]][1:]
                 writer.write(b'$'+str(len(temp)).encode()+ b'\r\n' + str(temp).encode()+ b'\r\n')
