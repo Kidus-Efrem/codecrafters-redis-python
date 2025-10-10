@@ -1,10 +1,11 @@
 import asyncio
 import time
-from collections import defaultdict
+from collections import defaultdict, deque
 BUF_SIZE = 4096
 
 async def handle_command(reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
     lst = defaultdict(list)
+    remove = defaultdict(deque)
     d = defaultdict(str)
     while True:
         chunk = await reader.read(BUF_SIZE)
@@ -58,6 +59,16 @@ async def handle_command(reader: asyncio.StreamReader, writer: asyncio.StreamWri
                 lst[elements[1]].append(elements[i])
                 i+=1
             writer.write(b':'+ str(len(lst[elements[1]])).encode()+b'\r\n')
+            while remove[elements[1]]:
+                cur = remove[elements[1]].pop()
+                if cur == 0 or cur <= time.time() :
+                    temp  = lst[elements[1]][0]
+                    lst[elements[1]] =  lst[elements[1]][1:]
+                    writer.write(b'*2\r\n'+b'$'+ str(len(elements[1])).encode()+b'\r\n'+elements[1].encode()+b'\r\n'+b'$'+str(len(temp)).encode()+ b'\r\n' + str(temp).encode()+ b'\r\n')
+                else:
+                    writer.write("*-1\r\n")
+
+
         if elements[0].lower() == 'lpush':
             i = 2
             while i < len(elements):
@@ -106,6 +117,15 @@ async def handle_command(reader: asyncio.StreamReader, writer: asyncio.StreamWri
                 writer.write(b'$'+str(len(temp)).encode()+ b'\r\n' + str(temp).encode()+ b'\r\n')
             else:
                 writer.write(b'$-1\r\n')
+        if elements[0].lower() == 'blop':
+            if lst[elements[1]]:
+                temp  = lst[elements[1]][0]
+                lst[elements[1]] =  lst[elements[1]][1:]
+                writer.write(b'*2\r\n'+b'$'+ str(len(elements[1])).encode()+b'\r\n'+elements[1].encode()+b'\r\n'+b'$'+str(len(temp)).encode()+ b'\r\n' + str(temp).encode()+ b'\r\n')
+            else:
+                remove[elements[1]].appendleft(time.time() + elements[2])
+
+
         await writer.drain()
     writer.close()
     await writer.wait_closed()
