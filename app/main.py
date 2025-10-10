@@ -80,7 +80,7 @@ async def handle_command(reader: asyncio.StreamReader, writer: asyncio.StreamWri
             r = int(elements[i+1])
             arr  =lst[elements[1]][l:r+1]
             if arr:
-                ans = '*'+ str(min(r, len(lst[elements[1]])-1)-l+1)
+                ans = '*'+ str(len(arr))
                 for a in arr:
                     ans += '\r\n'
                     ans += '$'+str(len(a))
