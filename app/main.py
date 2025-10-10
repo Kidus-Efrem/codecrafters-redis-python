@@ -124,9 +124,9 @@ async def handle_command(reader: asyncio.StreamReader, writer: asyncio.StreamWri
                 writer.write(b'*2\r\n'+b'$'+ str(len(elements[1])).encode()+b'\r\n'+elements[1].encode()+b'\r\n'+b'$'+str(len(temp)).encode()+ b'\r\n' + str(temp).encode()+ b'\r\n')
             else:
                 if elements[2]:
-                    remove[elements[1]].appendleft(time.time() + elements[2])
+                    remove[elements[1]].appendleft(time.time() + int(elements[2]))
                 else:
-                    remove[elements[1]].appendleft(elements[2])
+                    remove[elements[1]].appendleft(int(elements[2]))
 
 
 
