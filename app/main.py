@@ -68,7 +68,7 @@ async def handle_command(reader: asyncio.StreamReader, writer: asyncio.StreamWri
                     ans += '\r\n'
                     ans += '$'+str(len(elements[i]))
                     ans += '\r\n'
-                    ans ++ elements[i]
+                    ans += elements[i]
                 ans += '\r\n'
                 print(ans.encode())
             else:
