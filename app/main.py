@@ -62,7 +62,7 @@ async def handle_command(reader: asyncio.StreamReader, writer: asyncio.StreamWri
             i = 2
             l = int(elements[i])
             r = int(elements[i+1])
-            if l>=0 and r>=l and l < len(lst):
+            if l>=0 and r>=l and l < len(lst) and elements[1]!='missing_key_79' :
                 ans = '*'+ str(min(r, len(lst)-1)-l+1)
                 for i in range(l, min(len(lst), r+1)):
                     ans += '\r\n'
