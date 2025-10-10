@@ -59,7 +59,8 @@ async def handle_command(reader: asyncio.StreamReader, writer: asyncio.StreamWri
                 lst[elements[1]].append(elements[i])
                 i+=1
             writer.write(b':'+ str(len(lst[elements[1]])).encode()+b'\r\n')
-            while remove[elements[1]]:
+            while len(remove[elements[1]])> 0:
+                print("inside blpop")
                 cur = remove[elements[1]].pop()
                 if cur == 0 or cur <= time.time() :
                     temp  = lst[elements[1]][0]
