@@ -1,116 +1,143 @@
 import asyncio
+import time
 from collections import defaultdict, deque
+BUF_SIZE = 4096
 
-data = defaultdict(deque)
-blocked_clients = defaultdict(list)
+async def handle_command(reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
+    lst = defaultdict(list)
+    remove = defaultdict(deque)
+    d = defaultdict(str)
+    while True:
+        chunk = await reader.read(BUF_SIZE)
+        if not chunk:
+            break
+        i = 0
+        if chunk[i] == ord('*'):
+            i+=1
+            j = chunk.find(b'\r\n', i)
+            arrlen = int(chunk[i:j])
+        i = j+2
+        elements = []
+        for _ in range(arrlen):
+            if chunk[i] == ord('$'):
+                i+=1
+                j = chunk.find(b'\r\n', i)
+                wlen = int(chunk[i:j])
+                i = j+2
+                element = chunk[i:i+wlen]
+                i+= wlen+2
+                elements.append(element.decode())
+        print(elements)
+        if elements[0].lower() == 'echo':
+            writer.write(b"$" + str(len(elements[1])).encode() + b"\r\n" + elements[1].encode() + b"\r\n")
 
-# --- RESP Encoding Helpers ---
-def encode_bulk(value: str) -> bytes:
-    if value is None:
-        return b"$-1\r\n"
-    return b"$" + str(len(value)).encode() + b"\r\n" + value.encode() + b"\r\n"
+        if elements[0].lower() == 'ping':
+            # writer.write(b''++'\r\n')
 
-def encode_array(values: list[str]) -> bytes:
-    out = b"*" + str(len(values)).encode() + b"\r\n"
-    for v in values:
-        out += encode_bulk(v)
-    return out
+            writer.write(b"+PONG\r\n")
+        if elements[0].lower() == 'set':
+            addtime = float('inf')
+            if len(elements) >=4:
+                addtime = int(elements[4])
+                if elements[3] == 'PX':
+                    addtime =  int(elements[4])/1000
 
-def encode_integer(num: int) -> bytes:
-    return b":" + str(num).encode() + b"\r\n"
 
-# --- Core Logic ---
-async def handle_client(reader, writer):
-    addr = writer.get_extra_info("peername")
-    try:
-        while True:
-            line = await reader.readline()
-            if not line:
-                break
-            try:
-                count = int(line.strip()[1:])
-            except Exception:
-                continue
-            parts = []
-            for _ in range(count):
-                length_line = await reader.readline()
-                length = int(length_line.strip()[1:])
-                arg = (await reader.readexactly(length + 2))[:-2].decode()
-                parts.append(arg)
+            d[elements[1]] =(elements[2], time.time()+ addtime)
 
-            cmd = parts[0].upper()
+            writer.write(b"$2\r\nOK\r\n")
 
-            # --- RPUSH ---
-            if cmd == "RPUSH":
-                if len(parts) < 3:
-                    continue
-                key = parts[1]
-                vals = parts[2:]
-                for v in vals:
-                    data[key].append(v)
+        if elements[0].lower() =='get':
 
-                # ✅ Get length BEFORE unblocking
-                list_len = len(data[key])
-
-                # ✅ Unblock a waiting BLPOP client if present
-                if key in blocked_clients and blocked_clients[key]:
-                    waiting_writer = blocked_clients[key].pop(0)
-                    val = data[key].popleft()
-                    resp = encode_array([key, val])
-                    waiting_writer.write(resp)
-                    await waiting_writer.drain()
-
-                # ✅ Return correct list length
-                writer.write(encode_integer(list_len))
-                await writer.drain()
-
-            # --- LPOP ---
-            elif cmd == "LPOP":
-                key = parts[1]
-                count = int(parts[2]) if len(parts) > 2 else 1
-                result = []
-                for _ in range(count):
-                    if not data[key]:
-                        break
-                    result.append(data[key].popleft())
-
-                if len(result) == 0:
-                    writer.write(b"$-1\r\n")
-                elif len(result) == 1 and (len(parts) == 2):
-                    # Single element → bulk string
-                    writer.write(encode_bulk(result[0]))
-                else:
-                    # Multiple elements → array
-                    writer.write(encode_array(result))
-                await writer.drain()
-
-            # --- BLPOP ---
-            elif cmd == "BLPOP":
-                key = parts[1]
-                timeout = int(parts[2])
-                if data[key]:
-                    val = data[key].popleft()
-                    writer.write(encode_array([key, val]))
-                    await writer.drain()
-                else:
-                    # Block client
-                    blocked_clients[key].append(writer)
-
+            if  elements[1] in d and d[elements[1]][1] >= time.time():
+                writer.write(b'$' + str(len(d[elements[1]][0])).encode()+ b'\r\n'+d[elements[1]][0].encode() + b"\r\n")
             else:
-                # Unsupported command
-                writer.write(b"-ERR unknown command\r\n")
-                await writer.drain()
+                writer.write(b"$-1\r\n")
+        if elements[0].lower() == 'rpush':
+            i = 2
+            while i < len(elements):
+                lst[elements[1]].append(elements[i])
+                i+=1
+            writer.write(b':'+ str(len(lst[elements[1]])).encode()+b'\r\n')
+            while len(remove[elements[1]])> 0:
+                print("inside blpop")
+                cur = remove[elements[1]].pop()
+                if cur == 0 or cur <= time.time() :
+                    temp  = lst[elements[1]][0]
+                    lst[elements[1]] =  lst[elements[1]][1:]
+                    writer.write(b'*2\r\n'+b'$'+ str(len(elements[1])).encode()+b'\r\n'+elements[1].encode()+b'\r\n'+b'$'+str(len(temp)).encode()+ b'\r\n' + str(temp).encode()+ b'\r\n')
+                else:
+                    writer.write("*-1\r\n")
 
-    except Exception as e:
-        print("[your_program] Error:", e)
-    finally:
-        writer.close()
-        await writer.wait_closed()
 
-# --- Main ---
+        if elements[0].lower() == 'lpush':
+            i = 2
+            while i < len(elements):
+                lst[elements[1]] = [elements[i]] + lst[elements[1]]
+                i+=1
+            writer.write(b':'+ str(len(lst[elements[1]])).encode()+b'\r\n')
+
+        if elements[0].lower() == 'lrange':
+            i = 2
+            l = int(elements[i])
+            r = int(elements[i+1])
+            arr  =lst[elements[1]][l:r]
+            arr+=([lst[elements[1]][r]] if arr and -1*len(lst[elements[1]])< r < len(lst[elements[1]]) else [])
+            if arr:
+                ans = '*'+ str(len(arr))
+                for a in arr:
+                    ans += '\r\n'
+                    ans += '$'+str(len(a))
+                    ans += '\r\n'
+                    ans += a
+                ans += '\r\n'
+                writer.write(ans.encode())
+            else:
+                writer.write(b'*0\r\n')
+        if elements[0].lower() == 'llen':
+            writer.write(b':' + str(len(lst[elements[1]])).encode()+ b'\r\n')
+        if elements[0].lower() == 'lpop':
+            if len(elements) >=3:
+                arr  = lst[elements[1]][:int(elements[2])]
+                lst[elements[1]] =  lst[elements[1]][int(elements[2]):]
+                if arr:
+                    ans = '*'+ str(len(arr))
+                    for a in arr:
+                        ans+='\r\n'
+                        ans += '$'+str(len(a))
+                        ans += '\r\n'
+                        ans += a
+                    ans += '\r\n'
+                    writer.write(ans.encode())
+                else: writer.write(b'*0\r\n')
+
+
+            elif len(lst[elements[1]]):
+                temp  = lst[elements[1]][0]
+                lst[elements[1]] =  lst[elements[1]][1:]
+                writer.write(b'$'+str(len(temp)).encode()+ b'\r\n' + str(temp).encode()+ b'\r\n')
+            else:
+                writer.write(b'$-1\r\n')
+        if elements[0].lower() == 'blpop':
+            if len(lst[elements[1]]) > 0:
+                temp  = lst[elements[1]][0]
+                lst[elements[1]] =  lst[elements[1]][1:]
+                writer.write(b'*2\r\n'+b'$'+ str(len(elements[1])).encode()+b'\r\n'+elements[1].encode()+b'\r\n'+b'$'+str(len(temp)).encode()+ b'\r\n' + str(temp).encode()+ b'\r\n')
+            else:
+                if int(elements[2]):
+                    remove[elements[1]].appendleft(time.time() + int(elements[2]))
+                    writer.write(b'added one element')
+                else:
+                    remove[elements[1]].appendleft(int(elements[2]))
+
+
+
+        await writer.drain()
+    writer.close()
+    await writer.wait_closed()
+
 async def main():
-    server = await asyncio.start_server(handle_client, "127.0.0.1", 6379)
-    print("[your_program] Redis clone running on port 6379...")
+    server = await asyncio.start_server(handle_command, "localhost", 6379)
     async with server:
         await server.serve_forever()
 
