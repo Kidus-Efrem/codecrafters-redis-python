@@ -55,40 +55,39 @@ async def handle_command(reader, writer):
                                 pass  # client disconnected, ignore
 
                 # --- BLPOP command ---
-                elif command == 'blpop':
+                elif command == 'lpop':
                     key = elements[1]
-                    timeout = float(elements[2])
 
-                    # immediate pop if available
+                if len(elements) == 2:
+                    # Pop a single element
                     if lst[key]:
                         value = lst[key].pop(0)
                         writer.write(
-                            b'*2\r\n'
-                            + b'$' + str(len(key)).encode() + b'\r\n' + key.encode() + b'\r\n'
-                            + b'$' + str(len(value)).encode() + b'\r\n' + value.encode() + b'\r\n'
+                            b'$' + str(len(value)).encode() + b'\r\n' + value.encode() + b'\r\n'
                         )
-                        await writer.drain()
                     else:
-                        # store waiting client and schedule timeout if > 0
-                        expiry = (time.time() + timeout) if timeout > 0 else 0
-                        waiting[key].append((writer, expiry))
+                        writer.write(b"$-1\r\n")  # nil reply
+                    await writer.drain()
 
-                        if timeout > 0:
-                            async def timeout_task(wr, k, exp):
-                                await asyncio.sleep(timeout)
-                                # still waiting?
-                                for (w, e) in list(waiting[k]):
-                                    if w is wr:
-                                        waiting[k].remove((w, e))
-                                        try:
-                                            w.write(b"$-1\r\n")
-                                            await w.drain()
-                                        except Exception:
-                                            pass
-                                        break
-                            asyncio.create_task(timeout_task(writer, key, expiry))
+                elif len(elements) == 3:
+                    # Pop multiple elements
+                    count = int(elements[2])
+                    popped = []
 
-                # --- LRANGE (optional for debugging) ---
+                    for _ in range(min(count, len(lst[key]))):
+                        popped.append(lst[key].pop(0))
+
+                    # If nothing was popped, return nil
+                    if not popped:
+                        writer.write(b"$-1\r\n")
+                    else:
+                        # RESP array format
+                        reply = b'*' + str(len(popped)).encode() + b'\r\n'
+                        for val in popped:
+                            reply += b'$' + str(len(val)).encode() + b'\r\n' + val.encode() + b'\r\n'
+                        writer.write(reply)
+                    await writer.drain()
+
                 elif command == 'lrange':
                     key = elements[1]
                     start, end = int(elements[2]), int(elements[3])
