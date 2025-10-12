@@ -176,9 +176,17 @@ async def handle_command(reader: asyncio.StreamReader, writer: asyncio.StreamWri
         elif cmd == 'type':
             key = elements[1]
             if key in d and d[key][1] >= time.time():
-                writer.write(b'+' + type(d[key][0]).encode()+ b'\r\n')
+                val = d[key][0]
+                if isinstance(val, str):
+                    typename = "string"
+                elif isinstance(val, list):
+                    typename = "list"
+                else:
+                    typename = "none"
+                writer.write(f"+{typename}\r\n".encode())
             else:
-                writer.write(b'+none\r\n')
+                writer.write(b"+none\r\n")
+
 
         else:
             writer.write(b"-ERR unknown command\r\n")
