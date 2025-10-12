@@ -174,8 +174,11 @@ async def handle_command(reader: asyncio.StreamReader, writer: asyncio.StreamWri
 
                 asyncio.create_task(unblock_after_timeout())
         elif cmd == 'type':
-            key = elements[i]
-            writer.write(b'\r\n' + b'$' + len(type(lst[key])) + '\r\n' + type(lst[key]).encode()+ '\r\n')
+            key = elements[1]
+            if key in lst:
+                writer.write(b'+' + type(lst[key]).encode()+ '\r\n')
+            else:
+                writer.write(b'+string\r\n')
 
         else:
             writer.write(b"-ERR unknown command\r\n")
