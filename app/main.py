@@ -2,122 +2,193 @@ import asyncio
 import time
 from collections import defaultdict, deque
 
+BUF_SIZE = 4096
 
-# Global shared state
-lst = defaultdict(list)         # The actual Redis-like lists (key -> list of strings)
-waiting = defaultdict(deque)    # Keys that have BLPOP clients waiting (key -> deque of (writer, expiry))
+# Global data stores
+lst = defaultdict(list)      # For Redis lists
+remove = defaultdict(deque)  # For blocked clients (key → deque of writers)
+d = defaultdict(tuple)       # For key-value store with expiry
 
 
-async def handle_command(reader, writer):
-    addr = writer.get_extra_info('peername')
+async def handle_command(reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
+    global lst, remove, d
+
     while True:
-        try:
-            # Read the RESP command
-            data = await reader.readline()
-            if not data:
-                break
-
-            if data.startswith(b'*'):
-                num_args = int(data[1:-2])
-                elements = []
-                for _ in range(num_args):
-                    await reader.readline()               # skip length line
-                    bulk = await reader.readline()
-                    elements.append(bulk.strip().decode())
-
-                command = elements[0].lower()
-
-                # --- RPUSH command ---
-                if command == 'rpush':
-                    key = elements[1]
-                    # append all given values to the list
-                    for value in elements[2:]:
-                        lst[key].append(value)
-
-                    # Reply to RPUSH caller: length of the list
-                    writer.write(b':' + str(len(lst[key])).encode() + b'\r\n')
-                    await writer.drain()
-
-                    # If someone is waiting on BLPOP for this key, wake them
-                    if waiting[key]:
-                        blocked_writer, expiry = waiting[key].popleft()
-                        # deliver one element to the blocked client
-                        if lst[key]:
-                            value = lst[key].pop(0)
-                            try:
-                                blocked_writer.write(
-                                    b'*2\r\n'
-                                    + b'$' + str(len(key)).encode() + b'\r\n' + key.encode() + b'\r\n'
-                                    + b'$' + str(len(value)).encode() + b'\r\n' + value.encode() + b'\r\n'
-                                )
-                                await blocked_writer.drain()
-                            except Exception:
-                                pass  # client disconnected, ignore
-
-                # --- BLPOP command ---
-                elif command == 'lpop':
-                    key = elements[1]
-
-                if len(elements) == 2:
-                    # Pop a single element
-                    if lst[key]:
-                        value = lst[key].pop(0)
-                        writer.write(
-                            b'$' + str(len(value)).encode() + b'\r\n' + value.encode() + b'\r\n'
-                        )
-                    else:
-                        writer.write(b"$-1\r\n")  # nil reply
-                    await writer.drain()
-
-                elif len(elements) == 3:
-                    # Pop multiple elements
-                    count = int(elements[2])
-                    popped = []
-
-                    for _ in range(min(count, len(lst[key]))):
-                        popped.append(lst[key].pop(0))
-
-                    # If nothing was popped, return nil
-                    if not popped:
-                        writer.write(b"$-1\r\n")
-                    else:
-                        # RESP array format
-                        reply = b'*' + str(len(popped)).encode() + b'\r\n'
-                        for val in popped:
-                            reply += b'$' + str(len(val)).encode() + b'\r\n' + val.encode() + b'\r\n'
-                        writer.write(reply)
-                    await writer.drain()
-
-                elif command == 'lrange':
-                    key = elements[1]
-                    start, end = int(elements[2]), int(elements[3])
-                    arr = lst[key][start:end + 1]
-                    reply = b'*' + str(len(arr)).encode() + b'\r\n'
-                    for item in arr:
-                        reply += b'$' + str(len(item)).encode() + b'\r\n' + item.encode() + b'\r\n'
-                    writer.write(reply)
-                    await writer.drain()
-
-                else:
-                    writer.write(b"-ERR unknown command\r\n")
-                    await writer.drain()
-
-        except Exception as e:
-            print(f"Error with client {addr}: {e}")
+        chunk = await reader.read(BUF_SIZE)
+        if not chunk:
             break
+
+        i = 0
+        if chunk[i] == ord('*'):
+            i += 1
+            j = chunk.find(b'\r\n', i)
+            arrlen = int(chunk[i:j])
+        i = j + 2
+        elements = []
+        for _ in range(arrlen):
+            if chunk[i] == ord('$'):
+                i += 1
+                j = chunk.find(b'\r\n', i)
+                wlen = int(chunk[i:j])
+                i = j + 2
+                element = chunk[i:i + wlen]
+                i += wlen + 2
+                elements.append(element.decode())
+
+        print(elements)
+        cmd = elements[0].lower()
+
+        # ---------------- PING ----------------
+        if cmd == 'ping':
+            writer.write(b"+PONG\r\n")
+
+        # ---------------- ECHO ----------------
+        elif cmd == 'echo':
+            msg = elements[1]
+            writer.write(b"$" + str(len(msg)).encode() + b"\r\n" + msg.encode() + b"\r\n")
+
+        # ---------------- SET ----------------
+        elif cmd == 'set':
+            key, value = elements[1], elements[2]
+            expiry = float('inf')
+
+            if len(elements) >= 5 and elements[3].upper() == 'PX':
+                expiry = time.time() + int(elements[4]) / 1000
+
+            d[key] = (value, expiry)
+            writer.write(b"+OK\r\n")
+
+        # ---------------- GET ----------------
+        elif cmd == 'get':
+            key = elements[1]
+            if key in d:
+                val, expiry = d[key]
+                if expiry < time.time():
+                    del d[key]
+                    writer.write(b"$-1\r\n")
+                else:
+                    writer.write(f"${len(val)}\r\n{val}\r\n".encode())
+            else:
+                writer.write(b"$-1\r\n")
+
+        # ---------------- RPUSH ----------------
+        elif cmd == 'rpush':
+            key = elements[1]
+            for v in elements[2:]:
+                lst[key].append(v)
+            writer.write(f":{len(lst[key])}\r\n".encode())
+
+            # Wake up first blocked client (if any)
+            if key in remove and remove[key]:
+                blocked_writer = remove[key].popleft()
+                if lst[key]:
+                    element = lst[key].pop(0)
+                    resp = (
+                        f"*2\r\n${len(key)}\r\n{key}\r\n"
+                        f"${len(element)}\r\n{element}\r\n"
+                    ).encode()
+                    blocked_writer.write(resp)
+                    await blocked_writer.drain()
+
+        # ---------------- LPUSH ----------------
+        elif cmd == 'lpush':
+            key = elements[1]
+            for v in elements[2:]:
+                lst[key].insert(0, v)
+            writer.write(f":{len(lst[key])}\r\n".encode())
+
+        # ---------------- LLEN ----------------
+        elif cmd == 'llen':
+            key = elements[1]
+            writer.write(f":{len(lst[key])}\r\n".encode())
+
+        # ---------------- LRANGE ----------------
+        elif cmd == 'lrange':
+            key = elements[1]
+            start = int(elements[2])
+            end = int(elements[3])
+            arr = lst[key]
+            n = len(arr)
+
+            if start < 0:
+                start += n
+            if end < 0:
+                end += n
+            start = max(0, start)
+            end = min(end, n - 1)
+            if start > end or n == 0:
+                writer.write(b"*0\r\n")
+            else:
+                subset = arr[start:end + 1]
+                resp = f"*{len(subset)}\r\n".encode()
+                for item in subset:
+                    resp += f"${len(item)}\r\n{item}\r\n".encode()
+                writer.write(resp)
+
+        # ---------------- LPOP ----------------
+        elif cmd == 'lpop':
+            key = elements[1]
+            if len(elements) == 2:
+                if lst[key]:
+                    element = lst[key].pop(0)
+                    writer.write(f"${len(element)}\r\n{element}\r\n".encode())
+                else:
+                    writer.write(b"$-1\r\n")
+            else:
+                count = int(elements[2])
+                popped = [lst[key].pop(0) for _ in range(min(count, len(lst[key])))]
+                if popped:
+                    resp = f"*{len(popped)}\r\n".encode()
+                    for item in popped:
+                        resp += f"${len(item)}\r\n{item}\r\n".encode()
+                    writer.write(resp)
+                else:
+                    writer.write(b"*0\r\n")
+
+        # ---------------- BLPOP ----------------
+        elif cmd == 'blpop':
+            key = elements[1]
+            timeout = float(elements[2])
+
+            # If the list has items, return immediately
+            if lst[key]:
+                element = lst[key].pop(0)
+                resp = (
+                    f"*2\r\n${len(key)}\r\n{key}\r\n"
+                    f"${len(element)}\r\n{element}\r\n"
+                ).encode()
+                writer.write(resp)
+                await writer.drain()
+            else:
+                # No elements → block
+                remove[key].append(writer)
+
+                async def unblock_after_timeout():
+                    if timeout > 0:
+                        await asyncio.sleep(timeout)
+                        # Still blocked? Unblock with nil
+                        if writer in remove[key]:
+                            remove[key].remove(writer)
+                            writer.write(b"$-1\r\n")
+                            await writer.drain()
+
+                asyncio.create_task(unblock_after_timeout())
+
+        else:
+            writer.write(b"-ERR unknown command\r\n")
+
+        await writer.drain()
 
     writer.close()
     await writer.wait_closed()
 
 
 async def main():
-    server = await asyncio.start_server(handle_command, '127.0.0.1', 6379)
-    addr = server.sockets[0].getsockname()
-    print(f"Async Redis clone running on {addr}")
-
+    server = await asyncio.start_server(handle_command, "localhost", 6379)
+    print("Async Redis clone running on ('127.0.0.1', 6379)")
     async with server:
         await server.serve_forever()
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     asyncio.run(main())
