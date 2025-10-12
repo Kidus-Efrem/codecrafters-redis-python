@@ -175,8 +175,8 @@ async def handle_command(reader: asyncio.StreamReader, writer: asyncio.StreamWri
                 asyncio.create_task(unblock_after_timeout())
         elif cmd == 'type':
             key = elements[1]
-            if key in lst:
-                writer.write(b'+' + type(lst[key]).encode()+ '\r\n')
+            if key in d:
+                writer.write(b'+' + type(d[key]).encode()+ '\r\n')
             else:
                 writer.write(b'+none\r\n')
 
