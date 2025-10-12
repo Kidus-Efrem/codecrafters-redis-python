@@ -59,16 +59,14 @@ async def handle_command(reader: asyncio.StreamReader, writer: asyncio.StreamWri
                 lst[elements[1]].append(elements[i])
                 i+=1
             writer.write(b':'+ str(len(lst[elements[1]])).encode()+b'\r\n')
-            while len(remove[elements[1]])> 0:
-                print("inside blpop")
+            while remove[elements[1]]:
                 cur = remove[elements[1]].pop()
                 if cur == 0 or cur <= time.time() :
                     temp  = lst[elements[1]][0]
                     lst[elements[1]] =  lst[elements[1]][1:]
                     writer.write(b'*2\r\n'+b'$'+ str(len(elements[1])).encode()+b'\r\n'+elements[1].encode()+b'\r\n'+b'$'+str(len(temp)).encode()+ b'\r\n' + str(temp).encode()+ b'\r\n')
                 else:
-                    writer.write("*-1\r\n")
-
+                    writer.write(b"*-1\r\n")
 
         if elements[0].lower() == 'lpush':
             i = 2
@@ -119,17 +117,12 @@ async def handle_command(reader: asyncio.StreamReader, writer: asyncio.StreamWri
             else:
                 writer.write(b'$-1\r\n')
         if elements[0].lower() == 'blpop':
-            if len(lst[elements[1]]) > 0:
+            if lst[elements[1]]:
                 temp  = lst[elements[1]][0]
                 lst[elements[1]] =  lst[elements[1]][1:]
                 writer.write(b'*2\r\n'+b'$'+ str(len(elements[1])).encode()+b'\r\n'+elements[1].encode()+b'\r\n'+b'$'+str(len(temp)).encode()+ b'\r\n' + str(temp).encode()+ b'\r\n')
             else:
-                if int(elements[2]):
-                    remove[elements[1]].appendleft(time.time() + int(elements[2]))
-                    writer.write(b'added one element')
-                else:
-                    remove[elements[1]].appendleft(int(elements[2]))
-
+                remove[elements[1]].appendleft(time.time() + float(elements[2]))
 
 
         await writer.drain()
