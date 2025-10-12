@@ -178,7 +178,7 @@ async def handle_command(reader: asyncio.StreamReader, writer: asyncio.StreamWri
             if key in lst:
                 writer.write(b'+' + type(lst[key]).encode()+ '\r\n')
             else:
-                writer.write(b'+string\r\n')
+                writer.write(b'+none\r\n')
 
         else:
             writer.write(b"-ERR unknown command\r\n")
