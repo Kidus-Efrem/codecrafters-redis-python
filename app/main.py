@@ -169,7 +169,7 @@ async def handle_command(reader: asyncio.StreamReader, writer: asyncio.StreamWri
                         # Still blocked? Unblock with nil
                         if writer in remove[key]:
                             remove[key].remove(writer)
-                            writer.write(b"$-1\r\n")
+                            writer.write(b"*-1\r\n")
                             await writer.drain()
 
                 asyncio.create_task(unblock_after_timeout())
