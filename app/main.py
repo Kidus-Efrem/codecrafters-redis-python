@@ -183,7 +183,7 @@ async def handle_command(reader: asyncio.StreamReader, writer: asyncio.StreamWri
     await writer.wait_closed()
 
 
-async def main():
+async def main(): 
     server = await asyncio.start_server(handle_command, "localhost", 6379)
     print("Async Redis clone running on ('127.0.0.1', 6379)")
     async with server:
