@@ -176,7 +176,7 @@ async def handle_command(reader: asyncio.StreamReader, writer: asyncio.StreamWri
         elif cmd == 'type':
             key = elements[1]
             if key in d and d[key][1] >= time.time():
-                writer.write(b'+' + type(d[key][0]).encode()+ '\r\n')
+                writer.write(b'+' + type(d[key][0]).encode()+ b'\r\n')
             else:
                 writer.write(b'+none\r\n')
 
