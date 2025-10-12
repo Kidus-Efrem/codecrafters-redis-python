@@ -1,138 +1,124 @@
 import asyncio
 import time
 from collections import defaultdict, deque
-BUF_SIZE = 4096
 
-async def handle_command(reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
-    lst = defaultdict(list)
-    remove = defaultdict(deque)
-    d = defaultdict(str)
+
+# Global shared state
+lst = defaultdict(list)         # The actual Redis-like lists (key -> list of strings)
+waiting = defaultdict(deque)    # Keys that have BLPOP clients waiting (key -> deque of (writer, expiry))
+
+
+async def handle_command(reader, writer):
+    addr = writer.get_extra_info('peername')
     while True:
-        chunk = await reader.read(BUF_SIZE)
-        if not chunk:
-            break
-        i = 0
-        if chunk[i] == ord('*'):
-            i+=1
-            j = chunk.find(b'\r\n', i)
-            arrlen = int(chunk[i:j])
-        i = j+2
-        elements = []
-        for _ in range(arrlen):
-            if chunk[i] == ord('$'):
-                i+=1
-                j = chunk.find(b'\r\n', i)
-                wlen = int(chunk[i:j])
-                i = j+2
-                element = chunk[i:i+wlen]
-                i+= wlen+2
-                elements.append(element.decode())
-        print(elements)
-        if elements[0].lower() == 'echo':
-            writer.write(b"$" + str(len(elements[1])).encode() + b"\r\n" + elements[1].encode() + b"\r\n")
+        try:
+            # Read the RESP command
+            data = await reader.readline()
+            if not data:
+                break
 
-        if elements[0].lower() == 'ping':
-            # writer.write(b''++'\r\n')
+            if data.startswith(b'*'):
+                num_args = int(data[1:-2])
+                elements = []
+                for _ in range(num_args):
+                    await reader.readline()               # skip length line
+                    bulk = await reader.readline()
+                    elements.append(bulk.strip().decode())
 
-            writer.write(b"+PONG\r\n")
-        if elements[0].lower() == 'set':
-            addtime = float('inf')
-            if len(elements) >=4:
-                addtime = int(elements[4])
-                if elements[3] == 'PX':
-                    addtime =  int(elements[4])/1000
+                command = elements[0].lower()
 
+                # --- RPUSH command ---
+                if command == 'rpush':
+                    key = elements[1]
+                    # append all given values to the list
+                    for value in elements[2:]:
+                        lst[key].append(value)
 
-            d[elements[1]] =(elements[2], time.time()+ addtime)
+                    # Reply to RPUSH caller: length of the list
+                    writer.write(b':' + str(len(lst[key])).encode() + b'\r\n')
+                    await writer.drain()
 
-            writer.write(b"$2\r\nOK\r\n")
+                    # If someone is waiting on BLPOP for this key, wake them
+                    if waiting[key]:
+                        blocked_writer, expiry = waiting[key].popleft()
+                        # deliver one element to the blocked client
+                        if lst[key]:
+                            value = lst[key].pop(0)
+                            try:
+                                blocked_writer.write(
+                                    b'*2\r\n'
+                                    + b'$' + str(len(key)).encode() + b'\r\n' + key.encode() + b'\r\n'
+                                    + b'$' + str(len(value)).encode() + b'\r\n' + value.encode() + b'\r\n'
+                                )
+                                await blocked_writer.drain()
+                            except Exception:
+                                pass  # client disconnected, ignore
 
-        if elements[0].lower() =='get':
+                # --- BLPOP command ---
+                elif command == 'blpop':
+                    key = elements[1]
+                    timeout = float(elements[2])
 
-            if  elements[1] in d and d[elements[1]][1] >= time.time():
-                writer.write(b'$' + str(len(d[elements[1]][0])).encode()+ b'\r\n'+d[elements[1]][0].encode() + b"\r\n")
-            else:
-                writer.write(b"$-1\r\n")
-        if elements[0].lower() == 'rpush':
-            i = 2
-            while i < len(elements):
-                lst[elements[1]].append(elements[i])
-                i+=1
-            writer.write(b':'+ str(len(lst[elements[1]])).encode()+b'\r\n')
-            while remove[elements[1]]:
-                cur = remove[elements[1]].pop()
-                if cur == 0 or cur <= time.time() :
-                    temp  = lst[elements[1]][0]
-                    lst[elements[1]] =  lst[elements[1]][1:]
-                    writer.write(b'*2\r\n'+b'$'+ str(len(elements[1])).encode()+b'\r\n'+elements[1].encode()+b'\r\n'+b'$'+str(len(temp)).encode()+ b'\r\n' + str(temp).encode()+ b'\r\n')
+                    # immediate pop if available
+                    if lst[key]:
+                        value = lst[key].pop(0)
+                        writer.write(
+                            b'*2\r\n'
+                            + b'$' + str(len(key)).encode() + b'\r\n' + key.encode() + b'\r\n'
+                            + b'$' + str(len(value)).encode() + b'\r\n' + value.encode() + b'\r\n'
+                        )
+                        await writer.drain()
+                    else:
+                        # store waiting client and schedule timeout if > 0
+                        expiry = (time.time() + timeout) if timeout > 0 else 0
+                        waiting[key].append((writer, expiry))
+
+                        if timeout > 0:
+                            async def timeout_task(wr, k, exp):
+                                await asyncio.sleep(timeout)
+                                # still waiting?
+                                for (w, e) in list(waiting[k]):
+                                    if w is wr:
+                                        waiting[k].remove((w, e))
+                                        try:
+                                            w.write(b"$-1\r\n")
+                                            await w.drain()
+                                        except Exception:
+                                            pass
+                                        break
+                            asyncio.create_task(timeout_task(writer, key, expiry))
+
+                # --- LRANGE (optional for debugging) ---
+                elif command == 'lrange':
+                    key = elements[1]
+                    start, end = int(elements[2]), int(elements[3])
+                    arr = lst[key][start:end + 1]
+                    reply = b'*' + str(len(arr)).encode() + b'\r\n'
+                    for item in arr:
+                        reply += b'$' + str(len(item)).encode() + b'\r\n' + item.encode() + b'\r\n'
+                    writer.write(reply)
+                    await writer.drain()
+
                 else:
-                    writer.write(b"*-1\r\n")
+                    writer.write(b"-ERR unknown command\r\n")
+                    await writer.drain()
 
-        if elements[0].lower() == 'lpush':
-            i = 2
-            while i < len(elements):
-                lst[elements[1]] = [elements[i]] + lst[elements[1]]
-                i+=1
-            writer.write(b':'+ str(len(lst[elements[1]])).encode()+b'\r\n')
+        except Exception as e:
+            print(f"Error with client {addr}: {e}")
+            break
 
-        if elements[0].lower() == 'lrange':
-            i = 2
-            l = int(elements[i])
-            r = int(elements[i+1])
-            arr  =lst[elements[1]][l:r]
-            arr+=([lst[elements[1]][r]] if arr and -1*len(lst[elements[1]])< r < len(lst[elements[1]]) else [])
-            if arr:
-                ans = '*'+ str(len(arr))
-                for a in arr:
-                    ans += '\r\n'
-                    ans += '$'+str(len(a))
-                    ans += '\r\n'
-                    ans += a
-                ans += '\r\n'
-                writer.write(ans.encode())
-            else:
-                writer.write(b'*0\r\n')
-        if elements[0].lower() == 'llen':
-            writer.write(b':' + str(len(lst[elements[1]])).encode()+ b'\r\n')
-        if elements[0].lower() == 'lpop':
-            if len(elements) >=3:
-                arr  = lst[elements[1]][:int(elements[2])]
-                lst[elements[1]] =  lst[elements[1]][int(elements[2]):]
-                if arr:
-                    ans = '*'+ str(len(arr))
-                    for a in arr:
-                        ans+='\r\n'
-                        ans += '$'+str(len(a))
-                        ans += '\r\n'
-                        ans += a
-                    ans += '\r\n'
-                    writer.write(ans.encode())
-                else: writer.write(b'*0\r\n')
-
-
-            elif len(lst[elements[1]]):
-                temp  = lst[elements[1]][0]
-                lst[elements[1]] =  lst[elements[1]][1:]
-                writer.write(b'$'+str(len(temp)).encode()+ b'\r\n' + str(temp).encode()+ b'\r\n')
-            else:
-                writer.write(b'$-1\r\n')
-        if elements[0].lower() == 'blpop':
-            if lst[elements[1]]:
-                temp  = lst[elements[1]][0]
-                lst[elements[1]] =  lst[elements[1]][1:]
-                writer.write(b'*2\r\n'+b'$'+ str(len(elements[1])).encode()+b'\r\n'+elements[1].encode()+b'\r\n'+b'$'+str(len(temp)).encode()+ b'\r\n' + str(temp).encode()+ b'\r\n')
-            else:
-                remove[elements[1]].appendleft(time.time() + float(elements[2]))
-
-
-        await writer.drain()
     writer.close()
     await writer.wait_closed()
 
+
 async def main():
-    server = await asyncio.start_server(handle_command, "localhost", 6379)
+    server = await asyncio.start_server(handle_command, '127.0.0.1', 6379)
+    addr = server.sockets[0].getsockname()
+    print(f"Async Redis clone running on {addr}")
+
     async with server:
         await server.serve_forever()
 
-if __name__ == "__main__":
+
+if __name__ == '__main__':
     asyncio.run(main())
