@@ -8,6 +8,8 @@ BUF_SIZE = 4096
 lst = defaultdict(list)      # For Redis lists
 remove = defaultdict(deque)  # For blocked clients (key → deque of writers)
 d = defaultdict(tuple)       # For key-value store with expiry
+x = defaultdict(defaultdict(str))
+streams = set()
 
 
 async def handle_command(reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
@@ -175,10 +177,10 @@ async def handle_command(reader: asyncio.StreamReader, writer: asyncio.StreamWri
                 asyncio.create_task(unblock_after_timeout())
         elif cmd == 'type':
             key = elements[1]
-            if len(elements)== 2 and key == "stream_key":
-                writer.write(f"+{key}\r\n".encode())
+            if key in streams:
+                writer.write(b"+stream\r\n")
 
-            if key in d and d[key][1] >= time.time():
+            elif key in d and d[key][1] >= time.time():
                 val = d[key][0]
                 if isinstance(val, str):
 
@@ -192,6 +194,8 @@ async def handle_command(reader: asyncio.StreamReader, writer: asyncio.StreamWri
                 writer.write(b"+none\r\n")
 
         elif cmd == 'xadd':
+            streams.add(elements[1])
+            x[elements[2]][elements[3]] = elements[4]
             if len(elements) == 5:
                 id = elements[2]
                 writer.write(f'+{id}\r\n'.encode())
