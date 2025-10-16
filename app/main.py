@@ -199,9 +199,9 @@ async def handle_command(reader: asyncio.StreamReader, writer: asyncio.StreamWri
             t, sequence = elements[2].split('-')
             if sequence == "*":
                 if t in lastusedseq:
-                    sequence  = lastusedseq+1
+                    sequence  = lastusedseq[t]+1
 
-                else: 
+                else:
                     sequence = 0
                     if t == 0:
                         sequence +=1
