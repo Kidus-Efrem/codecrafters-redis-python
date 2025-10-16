@@ -8,7 +8,7 @@ BUF_SIZE = 4096
 lst = defaultdict(list)      # For Redis lists
 remove = defaultdict(deque)  # For blocked clients (key → deque of writers)
 d = defaultdict(tuple)       # For key-value store with expiry
-x = defaultdict(defaultdict(str))
+x = defaultdict(lambda :defaultdict(str))
 streams = set()
 
 
