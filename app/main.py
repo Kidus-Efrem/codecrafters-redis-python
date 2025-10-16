@@ -231,7 +231,7 @@ async def handle_command(reader: asyncio.StreamReader, writer: asyncio.StreamWri
                 lastusedtime = t
                 lastusedseq[lastusedtime] = sequence
                 # streams[elements[1]]
-                streams[elements[1]][elements[2]].append([elements[3]],elements[4])
+                streams[elements[1]][elements[2]].append([elements[3],elements[4]])
                 id = elements[2]
                 if elements[2] == '*':
                     writer.write(b'$' + str(len(str(sequence)) +1+ len(str(t))).encode()+b'\r\n' +f'{t}-{sequence}\r\n'.encode())
