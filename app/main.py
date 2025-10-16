@@ -289,8 +289,7 @@ async def handle_command(reader: asyncio.StreamReader, writer: asyncio.StreamWri
                     for a, b in v:
                         ans+='$'+ str(len(a))+'\r\n'+a+'\r\n'
                         ans+='$'+ str(len(b))+'\r\n'+b+'\r\n'
-            ans ='*'+str(cnt)+'\r\n'+'$'+str(len(key) )+'\r\n'+key+'\r\n'+ans
-            writer.write(ans.encode())
+            ans = '*' + str(2) + '\r\n' + '$' + str(len(key)) + '\r\n' + key + '\r\n' + ans
         else:
             writer.write(b"-ERR unknown command\r\n")
 
