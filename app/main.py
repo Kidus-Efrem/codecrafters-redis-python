@@ -175,9 +175,13 @@ async def handle_command(reader: asyncio.StreamReader, writer: asyncio.StreamWri
                 asyncio.create_task(unblock_after_timeout())
         elif cmd == 'type':
             key = elements[1]
+            if len(elements)== 2 and key == "stream_key":
+                writer.write(f"+{key}\r\n".encode())
+
             if key in d and d[key][1] >= time.time():
                 val = d[key][0]
                 if isinstance(val, str):
+
                     typename = "string"
                 elif isinstance(val, list):
                     typename = "list"
@@ -187,6 +191,10 @@ async def handle_command(reader: asyncio.StreamReader, writer: asyncio.StreamWri
             else:
                 writer.write(b"+none\r\n")
 
+        elif cmd == 'xadd':
+            if len(elements) == 5:
+                id = elements[2]
+                writer.write(f'+{id}\r\n'.encode())
 
         else:
             writer.write(b"-ERR unknown command\r\n")
