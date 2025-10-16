@@ -195,7 +195,7 @@ async def handle_command(reader: asyncio.StreamReader, writer: asyncio.StreamWri
                 writer.write(b"+none\r\n")
 
         elif cmd == 'xadd':
-            global lastusedtime, lastusedseq, x, streams
+            global lastusedtime
             t, sequence = elements[2].split('-')
             t = int(t)
             sequence  = int(t)
