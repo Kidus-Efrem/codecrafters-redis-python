@@ -275,8 +275,8 @@ async def handle_command(reader: asyncio.StreamReader, writer: asyncio.StreamWri
                 writer.write(ans.encode())
         elif cmd =='xread':
 
-            key = elements[1]
-            start = elements[2]
+            key = elements[2]
+            start = elements[3]
             ans = ''
             cnt = 0
             for k, v in streams[key].items():
