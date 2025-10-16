@@ -273,8 +273,24 @@ async def handle_command(reader: asyncio.StreamReader, writer: asyncio.StreamWri
                             ans+='$'+ str(len(b))+'\r\n'+b+'\r\n'
                 ans = '*'+str(cnt)+'\r\n'+ans
                 writer.write(ans.encode())
+        elif cmd =='xread':
 
-
+            key = elements[1]
+            start = elements[2]
+            ans = ''
+            cnt = 0
+            for k, v in streams[key].items():
+                if start<k:
+                    ans+="*2\r\n"
+                    ans +='$' + str(len(k))+"\r\n" +k+"\r\n"
+                    cnt +=1
+                    local = 0
+                    ans +='*'+str(len(v)*2)+'\r\n'
+                    for a, b in v:
+                        ans+='$'+ str(len(a))+'\r\n'+a+'\r\n'
+                        ans+='$'+ str(len(b))+'\r\n'+b+'\r\n'
+            ans = '*'+str(cnt)+'\r\n'+ans
+            writer.write(ans.encode())
         else:
             writer.write(b"-ERR unknown command\r\n")
 
