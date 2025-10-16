@@ -10,7 +10,8 @@ remove = defaultdict(deque)  # For blocked clients (key → deque of writers)
 d = defaultdict(tuple)       # For key-value store with expiry
 x = defaultdict(lambda :defaultdict(str))
 streams = set()
-
+lastusedtime = 0
+lastusedseq = defaultdict(int)
 
 async def handle_command(reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
     global lst, remove, d
@@ -194,11 +195,23 @@ async def handle_command(reader: asyncio.StreamReader, writer: asyncio.StreamWri
                 writer.write(b"+none\r\n")
 
         elif cmd == 'xadd':
-            streams.add(elements[1])
-            x[elements[2]][elements[3]] = elements[4]
-            if len(elements) == 5:
+            time, sequence = elements[2].split('-')
+            time = int(time)
+            sequence  = int(time)
+            if time < lastusedtime:
+                writer.write(b'-ERR The ID specified in XADD is equal or smaller than the target stream top item\r\n')
+            elif time == lastusedtime and lastusedseq[lastusedtime] == sequence:
+                writer.write(b'-ERR The ID specified in XADD is equal or smaller than the target stream top item\r\n')
+            elif time == sequence and time == 0:
+                writer.write(b'-ERR The ID specified in XADD must be greater than 0-0')
+            else:
+                lastusedtime = time
+                lastusedseq[lastusedtime] = sequence
+                streams.add(elements[1])
+                x[elements[2]][elements[3]] = elements[4]
                 id = elements[2]
                 writer.write(f'+{id}\r\n'.encode())
+
 
         else:
             writer.write(b"-ERR unknown command\r\n")
