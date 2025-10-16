@@ -196,19 +196,26 @@ async def handle_command(reader: asyncio.StreamReader, writer: asyncio.StreamWri
 
         elif cmd == 'xadd':
             global lastusedtime
-            t, sequence = elements[2].split('-')
-            t = int(t)
-
-            if sequence == "*":
+            if len(elements[2]) == 1:
+                t = time.time_ns()//1000000
                 if t in lastusedseq:
-                    sequence  = lastusedseq[t]+1
-
+                    sequence = lastusedseq[t] +1
                 else:
                     sequence = 0
-                    if t == 0:
-                        sequence +=1
+            else:
+                t, sequence = elements[2].split('-')
+                t = int(t)
 
-            sequence  = int(sequence)
+                if sequence == "*":
+                    if t in lastusedseq:
+                        sequence  = lastusedseq[t]+1
+
+                    else:
+                        sequence = 0
+                        if t == 0:
+                            sequence +=1
+
+                sequence  = int(sequence)
             if sequence == '*':
                 writer.write(b"hell no")
             elif t == sequence and t == 0:
