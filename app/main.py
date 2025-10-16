@@ -195,17 +195,18 @@ async def handle_command(reader: asyncio.StreamReader, writer: asyncio.StreamWri
                 writer.write(b"+none\r\n")
 
         elif cmd == 'xadd':
-            time, sequence = elements[2].split('-')
-            time = int(time)
-            sequence  = int(time)
-            if time < lastusedtime:
+            global lastusedtime, lastusedseq, x, streams
+            t, sequence = elements[2].split('-')
+            t = int(t)
+            sequence  = int(t)
+            if t < lastusedtime:
                 writer.write(b'-ERR The ID specified in XADD is equal or smaller than the target stream top item\r\n')
-            elif time == lastusedtime and lastusedseq[lastusedtime] == sequence:
+            elif t == lastusedtime and lastusedseq[lastusedtime] == sequence:
                 writer.write(b'-ERR The ID specified in XADD is equal or smaller than the target stream top item\r\n')
-            elif time == sequence and time == 0:
+            elif t == sequence and time == 0:
                 writer.write(b'-ERR The ID specified in XADD must be greater than 0-0')
             else:
-                lastusedtime = time
+                lastusedtime = t
                 lastusedseq[lastusedtime] = sequence
                 streams.add(elements[1])
                 x[elements[2]][elements[3]] = elements[4]
