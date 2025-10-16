@@ -1,7 +1,7 @@
 import asyncio
 import time
 from collections import defaultdict, deque
-from sortedcontainers import SortedDict
+# from sortedcontainers import SortedDict
 
 BUF_SIZE = 4096
 
@@ -9,7 +9,7 @@ BUF_SIZE = 4096
 lst = defaultdict(list)      # For Redis lists
 remove = defaultdict(deque)  # For blocked clients (key → deque of writers)
 d = defaultdict(tuple)       # For key-value store with expiry
-streams= defaultdict(SortedDict)
+streams= defaultdict(lambda:defaultdict(str))
 # streams = set()
 lastusedtime = 0
 lastusedseq = defaultdict(int)
@@ -244,7 +244,7 @@ async def handle_command(reader: asyncio.StreamReader, writer: asyncio.StreamWri
             writer.write(b"-ERR unknown command\r\n")
 
         await writer.drain()
- 
+
     writer.close()
     await writer.wait_closed()
 
