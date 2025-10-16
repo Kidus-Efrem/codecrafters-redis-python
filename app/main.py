@@ -238,6 +238,7 @@ async def handle_command(reader: asyncio.StreamReader, writer: asyncio.StreamWri
                 writer.write(f'+{t}-{sequence}\r\n'.encode())
 
         elif cmd == 'xrange':
+            pass
 
         else:
             writer.write(b"-ERR unknown command\r\n")
