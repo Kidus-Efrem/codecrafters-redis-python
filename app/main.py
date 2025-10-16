@@ -244,7 +244,7 @@ async def handle_command(reader: asyncio.StreamReader, writer: asyncio.StreamWri
             writer.write(b"-ERR unknown command\r\n")
 
         await writer.drain()
-
+ 
     writer.close()
     await writer.wait_closed()
 
