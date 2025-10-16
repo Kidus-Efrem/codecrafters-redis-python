@@ -250,7 +250,7 @@ async def handle_command(reader: asyncio.StreamReader, writer: asyncio.StreamWri
                     cnt +=1
                     local = 0
                     ans +='*'+str(len(v)*2)+'\r\n'
-                    for a, b in v.items():
+                    for a, b in v:
                         ans+='$'+ len(a)+'\r\n'+a+'\r\n'
                         ans+='$'+ len(b)+'\r\n'+a+'\r\n'
             writer.write(ans.encode())
