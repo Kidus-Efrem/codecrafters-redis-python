@@ -232,6 +232,8 @@ async def handle_command(reader: asyncio.StreamReader, writer: asyncio.StreamWri
                 streams.add(elements[1])
                 x[elements[2]][elements[3]] = elements[4]
                 id = elements[2]
+                if elements[2] == '*':
+                    writer.write(b'$' + str(len(sequence) + len(t)).encode()+b']r\n')
                 writer.write(f'+{t}-{sequence}\r\n'.encode())
 
 
