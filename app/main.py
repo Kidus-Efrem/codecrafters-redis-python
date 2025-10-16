@@ -202,7 +202,9 @@ async def handle_command(reader: asyncio.StreamReader, writer: asyncio.StreamWri
             if t < lastusedtime:
                 writer.write(b'-ERR The ID specified in XADD is equal or smaller than the target stream top item 1\r\n')
             elif t == lastusedtime and lastusedseq[lastusedtime] <= sequence:
-                writer.write(b'-ERR The ID specified in XADD is equal or smaller than the target stream top item 2' + str(t).encode()+ b'-'+str(sequence).encode()+b"\r\n")
+                t  =str(t)
+                sequence  = str(sequence)
+                writer.write(b'-ERR The ID specified in XADD is equal or smaller than the target stream top item 2' + (t).encode()+ b'-'+(sequence).encode()+b"\r\n")
             elif t == sequence and t == 0:
                 writer.write(b'-ERR The ID specified in XADD must be greater than 0-0')
             else:
