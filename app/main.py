@@ -253,6 +253,7 @@ async def handle_command(reader: asyncio.StreamReader, writer: asyncio.StreamWri
                     for a, b in v:
                         ans+='$'+ str(len(a))+'\r\n'+a+'\r\n'
                         ans+='$'+ str(len(b))+'\r\n'+b+'\r\n'
+            ans = '*'+str(cnt)+'\r\n'+ans
             writer.write(ans.encode())
 
 
