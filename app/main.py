@@ -9,7 +9,7 @@ BUF_SIZE = 4096
 lst = defaultdict(list)      # For Redis lists
 remove = defaultdict(deque)  # For blocked clients (key → deque of writers)
 d = defaultdict(tuple)       # For key-value store with expiry
-streams= defaultdict(lambda:defaultdict(dict))
+streams= defaultdict(lambda:defaultdict(list))
 # streams = set()
 lastusedtime = 0
 lastusedseq = defaultdict(int)
@@ -231,14 +231,30 @@ async def handle_command(reader: asyncio.StreamReader, writer: asyncio.StreamWri
                 lastusedtime = t
                 lastusedseq[lastusedtime] = sequence
                 # streams[elements[1]]
-                streams[elements[1]][elements[2]][elements[3]] = elements[4]
+                streams[elements[1]][elements[2]].add([elements[3]],elements[4])
                 id = elements[2]
                 if elements[2] == '*':
                     writer.write(b'$' + str(len(str(sequence)) +1+ len(str(t))).encode()+b'\r\n' +f'{t}-{sequence}\r\n'.encode())
                 writer.write(f'+{t}-{sequence}\r\n'.encode())
 
         elif cmd == 'xrange':
-            pass
+            # pass
+            start, end = elements[2], elements[3]
+            key = elements[1]
+            ans = ''
+            cnt = 0
+            for k, v in streams[key]:
+                if start<=k<=end:
+                    ans+="*2\r\n"
+                    ans +='$' + str(len(k))+"\r\n" +k+"\r\n"
+                    cnt +=1
+                    local = 0
+                    ans +='*'+str(len(v)*2)+'\r\n'
+                    for a, b in v:
+                        ans+='$'+ len(a)+'\r\n'+a+'\r\n'
+                        ans+='$'+ len(b)+'\r\n'+a+'\r\n'
+            writer.write(ans.encode())
+
 
         else:
             writer.write(b"-ERR unknown command\r\n")
