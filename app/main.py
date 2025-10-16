@@ -225,7 +225,7 @@ async def handle_command(reader: asyncio.StreamReader, writer: asyncio.StreamWri
                 streams.add(elements[1])
                 x[elements[2]][elements[3]] = elements[4]
                 id = elements[2]
-                writer.write(f'+{id}\r\n'.encode())
+                writer.write(f'+{t}-{sequence}\r\n'.encode())
 
 
         else:
