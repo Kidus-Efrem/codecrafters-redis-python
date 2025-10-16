@@ -239,6 +239,7 @@ async def handle_command(reader: asyncio.StreamReader, writer: asyncio.StreamWri
 
         elif cmd == 'xrange':
             if len(elements) == 4 and elements[3] == '+':
+                key = elements[1]
                 ans = ''
                 cnt = 0
                 for k, v in streams[key].items():
