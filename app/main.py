@@ -270,6 +270,7 @@ async def handle_command(reader: asyncio.StreamReader, writer: asyncio.StreamWri
         # ---------------- XREAD ----------------
         elif cmd == 'xread':
             # if len(elements) > 4:
+            ans = ''
             for i in range(2, len(elements[2:])//2 +1):
                 key = elements[i]
                 start = elements[i+len(elements[2:])//2]
@@ -296,7 +297,7 @@ async def handle_command(reader: asyncio.StreamReader, writer: asyncio.StreamWri
                             # DO NOT add an extra array wrapper here — append the entry directly
                             entries += entry
 
-                ans = (
+                ans += (
                     f"*1\r\n"
                     f"*2\r\n"
                     f"${len(key)}\r\n{key}\r\n"
@@ -305,6 +306,7 @@ async def handle_command(reader: asyncio.StreamReader, writer: asyncio.StreamWri
                 )
 
                 writer.write(ans.encode())
+                # writer.drain
 
             # key = elements[2]
             # start = elements[3]
