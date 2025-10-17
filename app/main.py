@@ -269,80 +269,33 @@ async def handle_command(reader: asyncio.StreamReader, writer: asyncio.StreamWri
 
         # ---------------- XREAD ----------------
         elif cmd == 'xread':
-            # if len(elements) > 4:
-            ans = ''
-            for i in range(len(elements[2:])//2):
-                key = elements[i+2]
-                start = elements[i+(len(elements[2:])//2)+2]
+            total = len(elements[2:])
+            half = total // 2
+            keys = elements[2:2 + half]
+            starts = elements[2 + half:]
+            ans = f"*{len(keys)}\r\n"  # Top-level array contains all streams
 
+            for idx, key in enumerate(keys):
+                start = starts[idx]
                 entries = ""
                 cnt = 0
 
                 if key in streams:
-                    for k, v in streams[key].items():
+                    for k, v_list in streams[key].items():
                         if start < k:
                             cnt += 1
+                            # Flatten all field-value pairs for this entry
+                            field_values = ""
+                            for fields in v_list:
+                                field_values += f"*{len(fields)}\r\n"
+                                for field in fields:
+                                    field_values += f"${len(field)}\r\n{field}\r\n"
+                            entries += f"*2\r\n${len(k)}\r\n{k}\r\n{field_values}"
 
-                            field_values = f"*{len(v) * 2}\r\n"
-                            for a, b in v:
-                                field_values += f"${len(a)}\r\n{a}\r\n"
-                                field_values += f"${len(b)}\r\n{b}\r\n"
-
-                            entry = (
-                                f"*2\r\n"
-                                f"${len(k)}\r\n{k}\r\n"
-                                f"{field_values}"
-                            )
-
-                            # DO NOT add an extra array wrapper here — append the entry directly
-                            entries += entry
-
-                ans = (
-                    f"*1\r\n"
-                    f"*2\r\n"
-                    f"${len(key)}\r\n{key}\r\n"
-                    f"*{cnt}\r\n"
-                    f"{entries}"
-                )
+                ans += f"*2\r\n${len(key)}\r\n{key}\r\n*{cnt}\r\n{entries}"
 
             writer.write(ans.encode())
             await writer.drain()
-                # writer.drain
-
-            # key = elements[2]
-            # start = elements[3]
-
-            # entries = ""
-            # cnt = 0
-
-            # if key in streams:
-            #     for k, v in streams[key].items():
-            #         if start < k:
-            #             cnt += 1
-
-            #             field_values = f"*{len(v) * 2}\r\n"
-            #             for a, b in v:
-            #                 field_values += f"${len(a)}\r\n{a}\r\n"
-            #                 field_values += f"${len(b)}\r\n{b}\r\n"
-
-            #             entry = (
-            #                 f"*2\r\n"
-            #                 f"${len(k)}\r\n{k}\r\n"
-            #                 f"{field_values}"
-            #             )
-
-            #             # DO NOT add an extra array wrapper here — append the entry directly
-            #             entries += entry
-
-            # ans = (
-            #     f"*1\r\n"
-            #     f"*2\r\n"
-            #     f"${len(key)}\r\n{key}\r\n"
-            #     f"*{cnt}\r\n"
-            #     f"{entries}"
-            # )
-
-            # writer.write(ans.encode())
 
         # ---------------- UNKNOWN ----------------
         else:
