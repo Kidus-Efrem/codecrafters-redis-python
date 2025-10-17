@@ -306,6 +306,7 @@ async def handle_command(reader: asyncio.StreamReader, writer: asyncio.StreamWri
                 )
 
             writer.write(ans.encode())
+            await writer.drain()
                 # writer.drain
 
             # key = elements[2]
