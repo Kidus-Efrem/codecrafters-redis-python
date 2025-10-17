@@ -271,9 +271,9 @@ async def handle_command(reader: asyncio.StreamReader, writer: asyncio.StreamWri
         elif cmd == 'xread':
             # if len(elements) > 4:
             ans = ''
-            for i in range(2, len(elements[2:])//2 +2):
-                key = elements[i]
-                start = elements[i+len(elements[2:])//2]
+            for i in range(len(elements[2:])//2):
+                key = elements[i+2]
+                start = elements[i+(len(elements[2:])//2)+2]
 
                 entries = ""
                 cnt = 0
