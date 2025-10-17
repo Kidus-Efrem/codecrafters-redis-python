@@ -265,7 +265,7 @@ async def handle_command(reader: asyncio.StreamReader, writer: asyncio.StreamWri
                             ans += '$' + str(len(a)) + '\r\n' + a + '\r\n'
                             ans += '$' + str(len(b)) + '\r\n' + b + '\r\n'
                 ans = '*' + str(cnt) + '\r\n' + ans
-                writer.write(ans.encode())
+                writer.write(ans.encode()) 
 
         # ---------------- XREAD ----------------
         elif cmd == 'xread':
@@ -291,7 +291,8 @@ async def handle_command(reader: asyncio.StreamReader, writer: asyncio.StreamWri
                             f"{field_values}"
                         )
 
-                        entries += f"*1\r\n{entry}"
+                        # DO NOT add an extra array wrapper here — append the entry directly
+                        entries += entry
 
             ans = (
                 f"*1\r\n"
