@@ -270,41 +270,41 @@ async def handle_command(reader: asyncio.StreamReader, writer: asyncio.StreamWri
         # ---------------- XREAD ----------------
         elif cmd == 'xread':
             # if len(elements) > 4:
-                for i in range(2, len(elements[2:])//2):
-                    key = elements[i]
-                    start = elements[i+len(elements[2:])//2]
+            for i in range(2, len(elements[2:])//2):
+                key = elements[i]
+                start = elements[i+len(elements[2:])//2]
 
-                    entries = ""
-                    cnt = 0
+                entries = ""
+                cnt = 0
 
-                    if key in streams:
-                        for k, v in streams[key].items():
-                            if start < k:
-                                cnt += 1
+                if key in streams:
+                    for k, v in streams[key].items():
+                        if start < k:
+                            cnt += 1
 
-                                field_values = f"*{len(v) * 2}\r\n"
-                                for a, b in v:
-                                    field_values += f"${len(a)}\r\n{a}\r\n"
-                                    field_values += f"${len(b)}\r\n{b}\r\n"
+                            field_values = f"*{len(v) * 2}\r\n"
+                            for a, b in v:
+                                field_values += f"${len(a)}\r\n{a}\r\n"
+                                field_values += f"${len(b)}\r\n{b}\r\n"
 
-                                entry = (
-                                    f"*2\r\n"
-                                    f"${len(k)}\r\n{k}\r\n"
-                                    f"{field_values}"
-                                )
+                            entry = (
+                                f"*2\r\n"
+                                f"${len(k)}\r\n{k}\r\n"
+                                f"{field_values}" 
+                            )
 
-                                # DO NOT add an extra array wrapper here — append the entry directly
-                                entries += entry
+                            # DO NOT add an extra array wrapper here — append the entry directly
+                            entries += entry
 
-                    ans = (
-                        f"*1\r\n"
-                        f"*2\r\n"
-                        f"${len(key)}\r\n{key}\r\n"
-                        f"*{cnt}\r\n"
-                        f"{entries}"
-                    )
+                ans = (
+                    f"*1\r\n"
+                    f"*2\r\n"
+                    f"${len(key)}\r\n{key}\r\n"
+                    f"*{cnt}\r\n"
+                    f"{entries}"
+                )
 
-                    writer.write(ans.encode())
+                writer.write(ans.encode())
 
             # key = elements[2]
             # start = elements[3]
