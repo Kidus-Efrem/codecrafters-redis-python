@@ -297,7 +297,7 @@ async def handle_command(reader: asyncio.StreamReader, writer: asyncio.StreamWri
                             # DO NOT add an extra array wrapper here — append the entry directly
                             entries += entry
 
-                ans += (
+                ans = (
                     f"*1\r\n"
                     f"*2\r\n"
                     f"${len(key)}\r\n{key}\r\n"
