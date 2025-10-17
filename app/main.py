@@ -9,8 +9,7 @@ BUF_SIZE = 4096
 lst = defaultdict(list)      # For Redis lists
 remove = defaultdict(deque)  # For blocked clients (key → deque of writers)
 d = defaultdict(tuple)       # For key-value store with expiry
-streams= defaultdict(lambda:defaultdict(list))
-# streams = set()
+streams = defaultdict(lambda: defaultdict(list))
 lastusedtime = 0
 lastusedseq = defaultdict(int)
 
@@ -177,15 +176,14 @@ async def handle_command(reader: asyncio.StreamReader, writer: asyncio.StreamWri
                             await writer.drain()
 
                 asyncio.create_task(unblock_after_timeout())
+
         elif cmd == 'type':
             key = elements[1]
             if key in streams:
                 writer.write(b"+stream\r\n")
-
             elif key in d and d[key][1] >= time.time():
                 val = d[key][0]
                 if isinstance(val, str):
-
                     typename = "string"
                 elif isinstance(val, list):
                     typename = "list"
@@ -195,12 +193,13 @@ async def handle_command(reader: asyncio.StreamReader, writer: asyncio.StreamWri
             else:
                 writer.write(b"+none\r\n")
 
+        # ---------------- XADD ----------------
         elif cmd == 'xadd':
             global lastusedtime
             if len(elements[2]) == 1:
-                t = time.time_ns()//1000000
+                t = time.time_ns() // 1000000
                 if t in lastusedseq:
-                    sequence = lastusedseq[t] +1
+                    sequence = lastusedseq[t] + 1
                 else:
                     sequence = 0
             else:
@@ -209,34 +208,31 @@ async def handle_command(reader: asyncio.StreamReader, writer: asyncio.StreamWri
 
                 if sequence == "*":
                     if t in lastusedseq:
-                        sequence  = lastusedseq[t]+1
-
+                        sequence = lastusedseq[t] + 1
                     else:
                         sequence = 0
                         if t == 0:
-                            sequence +=1
+                            sequence += 1
 
-                sequence  = int(sequence)
+                sequence = int(sequence)
             if sequence == '*':
                 writer.write(b"hell no")
             elif t == sequence and t == 0:
                 writer.write(b'-ERR The ID specified in XADD must be greater than 0-0\r\n')
             elif t < lastusedtime:
                 writer.write(b'-ERR The ID specified in XADD is equal or smaller than the target stream top item\r\n')
-
-            elif t == lastusedtime and  sequence<=lastusedseq[lastusedtime] :
+            elif t == lastusedtime and sequence <= lastusedseq[lastusedtime]:
                 writer.write(b'-ERR The ID specified in XADD is equal or smaller than the target stream top item\r\n')
-
             else:
                 lastusedtime = t
                 lastusedseq[lastusedtime] = sequence
-                # streams[elements[1]]
-                streams[elements[1]][elements[2]].append([elements[3],elements[4]])
+                streams[elements[1]][elements[2]].append([elements[3], elements[4]])
                 id = elements[2]
                 if elements[2] == '*':
-                    writer.write(b'$' + str(len(str(sequence)) +1+ len(str(t))).encode()+b'\r\n' +f'{t}-{sequence}\r\n'.encode())
+                    writer.write(b'$' + str(len(str(sequence)) + 1 + len(str(t))).encode() + b'\r\n' + f'{t}-{sequence}\r\n'.encode())
                 writer.write(f'+{t}-{sequence}\r\n'.encode())
 
+        # ---------------- XRANGE ----------------
         elif cmd == 'xrange':
             if len(elements) == 4 and elements[3] == '+':
                 key = elements[1]
@@ -244,53 +240,70 @@ async def handle_command(reader: asyncio.StreamReader, writer: asyncio.StreamWri
                 ans = ''
                 cnt = 0
                 for k, v in streams[key].items():
-                    if start<=k:
-                        ans+="*2\r\n"
-                        ans +='$' + str(len(k))+"\r\n" +k+"\r\n"
-                        cnt +=1
-                        local = 0
-                        ans +='*'+str(len(v)*2)+'\r\n'
+                    if start <= k:
+                        ans += "*2\r\n"
+                        ans += '$' + str(len(k)) + "\r\n" + k + "\r\n"
+                        cnt += 1
+                        ans += '*' + str(len(v) * 2) + '\r\n'
                         for a, b in v:
-                            ans+='$'+ str(len(a))+'\r\n'+a+'\r\n'
-                            ans+='$'+ str(len(b))+'\r\n'+b+'\r\n'
-                ans = '*'+str(cnt)+'\r\n'+ans
+                            ans += '$' + str(len(a)) + '\r\n' + a + '\r\n'
+                            ans += '$' + str(len(b)) + '\r\n' + b + '\r\n'
+                ans = '*' + str(cnt) + '\r\n' + ans
                 writer.write(ans.encode())
-            # pass
             else:
                 start, end = elements[2], elements[3]
                 key = elements[1]
                 ans = ''
                 cnt = 0
                 for k, v in streams[key].items():
-                    if start<=k<=end:
-                        ans+="*2\r\n"
-                        ans +='$' + str(len(k))+"\r\n" +k+"\r\n"
-                        cnt +=1
-                        local = 0
-                        ans +='*'+str(len(v)*2)+'\r\n'
+                    if start <= k <= end:
+                        ans += "*2\r\n"
+                        ans += '$' + str(len(k)) + "\r\n" + k + "\r\n"
+                        cnt += 1
+                        ans += '*' + str(len(v) * 2) + '\r\n'
                         for a, b in v:
-                            ans+='$'+ str(len(a))+'\r\n'+a+'\r\n'
-                            ans+='$'+ str(len(b))+'\r\n'+b+'\r\n'
-                ans = '*'+str(cnt)+'\r\n'+ans
+                            ans += '$' + str(len(a)) + '\r\n' + a + '\r\n'
+                            ans += '$' + str(len(b)) + '\r\n' + b + '\r\n'
+                ans = '*' + str(cnt) + '\r\n' + ans
                 writer.write(ans.encode())
-        elif cmd =='xread':
 
+        # ---------------- XREAD ----------------
+        elif cmd == 'xread':
             key = elements[2]
             start = elements[3]
-            ans = ''
+
+            entries = ""
             cnt = 0
-            for k, v in streams[key].items():
-                if start<k:
-                    ans+="*2\r\n"
-                    ans +='$' + str(len(k))+"\r\n" +k+"\r\n"
-                    cnt +=1
-                    local = 0
-                    ans +='*'+str(len(v)*2)+'\r\n'
-                    for a, b in v:
-                        ans+='$'+ str(len(a))+'\r\n'+a+'\r\n'
-                        ans+='$'+ str(len(b))+'\r\n'+b+'\r\n'
-            ans = '*' + str(2) + '\r\n' + '$' + str(len(key)) + '\r\n' + key + '\r\n' + ans
+
+            if key in streams:
+                for k, v in streams[key].items():
+                    if start < k:
+                        cnt += 1
+
+                        field_values = f"*{len(v) * 2}\r\n"
+                        for a, b in v:
+                            field_values += f"${len(a)}\r\n{a}\r\n"
+                            field_values += f"${len(b)}\r\n{b}\r\n"
+
+                        entry = (
+                            f"*2\r\n"
+                            f"${len(k)}\r\n{k}\r\n"
+                            f"{field_values}"
+                        )
+
+                        entries += f"*1\r\n{entry}"
+
+            ans = (
+                f"*1\r\n"
+                f"*2\r\n"
+                f"${len(key)}\r\n{key}\r\n"
+                f"*{cnt}\r\n"
+                f"{entries}"
+            )
+
             writer.write(ans.encode())
+
+        # ---------------- UNKNOWN ----------------
         else:
             writer.write(b"-ERR unknown command\r\n")
 
