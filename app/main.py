@@ -269,33 +269,62 @@ async def handle_command(reader: asyncio.StreamReader, writer: asyncio.StreamWri
 
         # ---------------- XREAD ----------------
         elif cmd == 'xread':
-            total = len(elements[2:])
-            half = total // 2
-            keys = elements[2:2 + half]
-            starts = elements[2 + half:]
-            ans = f"*{len(keys)}\r\n"  # Top-level array contains all streams
+            if elements[1] == 'BLOCK':
+                timeout = int(elements[2])
+                key = elements[4]
+                # start = elements[3]  # assuming start comes from the command
 
-            for idx, key in enumerate(keys):
-                start = starts[idx]
-                entries = ""
-                cnt = 0
+                async def unblock_after_timeout():
+                    await asyncio.sleep(timeout)
 
-                if key in streams:
-                    for k, v_list in streams[key].items():
-                        if start < k:
-                            cnt += 1
-                            # Flatten all field-value pairs for this entry
-                            field_values = ""
+                    if key in streams:
+                        cnt = 0
+                        entries = ""
+                        for k, v_list in streams[key].items():
+                            # if start < k:
+                            #     cnt += 1
+                                # field_values = ""
                             for fields in v_list:
                                 field_values += f"*{len(fields)}\r\n"
                                 for field in fields:
                                     field_values += f"${len(field)}\r\n{field}\r\n"
                             entries += f"*2\r\n${len(k)}\r\n{k}\r\n{field_values}"
 
-                ans += f"*2\r\n${len(key)}\r\n{key}\r\n*{cnt}\r\n{entries}"
+                        ans = f"*2\r\n${len(key)}\r\n{key}\r\n*{cnt}\r\n{entries}"
+                        writer.write(ans.encode())
+                        await writer.drain()
 
-            writer.write(ans.encode())
-            await writer.drain()
+                asyncio.create_task(unblock_after_timeout())
+                writer.write(b"*-1\r\n")
+
+            else:
+                total = len(elements[2:])
+                half = total // 2
+                keys = elements[2:2 + half]
+                starts = elements[2 + half:]
+                ans = f"*{len(keys)}\r\n"  # Top-level array contains all streams
+
+                for idx, key in enumerate(keys):
+                    start = starts[idx]
+                    entries = ""
+                    cnt = 0
+
+                    if key in streams:
+                        for k, v_list in streams[key].items():
+                            if start < k:
+                                cnt += 1
+                                # Flatten all field-value pairs for this entry
+                                field_values = ""
+                                for fields in v_list:
+                                    field_values += f"*{len(fields)}\r\n"
+                                    for field in fields:
+                                        field_values += f"${len(field)}\r\n{field}\r\n"
+                                entries += f"*2\r\n${len(k)}\r\n{k}\r\n{field_values}"
+
+                    ans += f"*2\r\n${len(key)}\r\n{key}\r\n*{cnt}\r\n{entries}"
+
+                writer.write(ans.encode())
+                await writer.drain()
 
         # ---------------- UNKNOWN ----------------
         else:
