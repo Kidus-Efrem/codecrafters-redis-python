@@ -283,7 +283,7 @@ async def handle_command(reader: asyncio.StreamReader, writer: asyncio.StreamWri
                         for k, v_list in streams[key].items():
                             # if start < k:
                             #     cnt += 1
-                                # field_values = ""
+                            field_values = ""
                             for fields in v_list:
                                 field_values += f"*{len(fields)}\r\n"
                                 for field in fields:
