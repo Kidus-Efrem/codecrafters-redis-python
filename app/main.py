@@ -12,6 +12,7 @@ d = defaultdict(tuple)       # For key-value store with expiry
 streams = defaultdict(lambda: defaultdict(list))
 lastusedtime = 0
 lastusedseq = defaultdict(int)
+xread_zero_block = defaultdict(str)
 
 async def handle_command(reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
     global lst, remove, d
@@ -231,6 +232,31 @@ async def handle_command(reader: asyncio.StreamReader, writer: asyncio.StreamWri
                 if elements[2] == '*':
                     writer.write(b'$' + str(len(str(sequence)) + 1 + len(str(t))).encode() + b'\r\n' + f'{t}-{sequence}\r\n'.encode())
                 writer.write(f'+{t}-{sequence}\r\n'.encode())
+            if xread_zero_block[elements[1]]:
+                start = xread_zero_block[elements[1]]
+                if key not in streams or not streams[key]:
+                            writer.write(b"*-1\r\n")
+                            await writer.drain()
+                            return
+
+                entries = ""
+                cnt = 0
+                for k, v_list in streams[key].items():
+                    if k > start:  # only entries newer than given ID
+                        cnt += 1
+                        field_values = ""
+                        for fields in v_list:
+                            field_values += f"*{len(fields)}\r\n"
+                            for field in fields:
+                                field_values += f"${len(field)}\r\n{field}\r\n"
+                        entries += f"*2\r\n${len(k)}\r\n{k}\r\n{field_values}"
+
+                xread_zero_block[elements[1]] = 0
+                ans = f"*1\r\n*2\r\n${len(key)}\r\n{key}\r\n*{cnt}\r\n{entries}"
+                writer.write(ans.encode())
+
+
+
 
         # ---------------- XRANGE ----------------
         elif cmd == 'xrange':
@@ -273,38 +299,40 @@ async def handle_command(reader: asyncio.StreamReader, writer: asyncio.StreamWri
                 timeout_ms = int(elements[2])
                 key = elements[4]
                 start = elements[5]
+                if timeout == 0:
+                    xread_zero_block[key] = start
+                else:
 
-                async def unblock_after_timeout():
-                    await asyncio.sleep(timeout_ms / 1000)  # Redis uses milliseconds
+                    async def unblock_after_timeout():
+                        await asyncio.sleep(timeout_ms / 1000)  # Redis uses milliseconds
 
-                    # If there’s no new entry, respond with nil
-                    if key not in streams or not streams[key]:
-                        writer.write(b"*-1\r\n")
+                        # If there’s no new entry, respond with nil
+                        if key not in streams or not streams[key]:
+                            writer.write(b"*-1\r\n")
+                            await writer.drain()
+                            return
+
+                        entries = ""
+                        cnt = 0
+                        for k, v_list in streams[key].items():
+                            if k > start:  # only entries newer than given ID
+                                cnt += 1
+                                field_values = ""
+                                for fields in v_list:
+                                    field_values += f"*{len(fields)}\r\n"
+                                    for field in fields:
+                                        field_values += f"${len(field)}\r\n{field}\r\n"
+                                entries += f"*2\r\n${len(k)}\r\n{k}\r\n{field_values}"
+
+                        if cnt == 0:
+                            writer.write(b"*-1\r\n")
+                        else:
+                            ans = f"*1\r\n*2\r\n${len(key)}\r\n{key}\r\n*{cnt}\r\n{entries}"
+                            writer.write(ans.encode())
+
                         await writer.drain()
-                        return
 
-                    entries = ""
-                    cnt = 0
-                    for k, v_list in streams[key].items():
-                        if k > start:  # only entries newer than given ID
-                            cnt += 1
-                            field_values = ""
-                            for fields in v_list:
-                                field_values += f"*{len(fields)}\r\n"
-                                for field in fields:
-                                    field_values += f"${len(field)}\r\n{field}\r\n"
-                            entries += f"*2\r\n${len(k)}\r\n{k}\r\n{field_values}"
-
-                    if cnt == 0:
-                        writer.write(b"*-1\r\n")
-                    else:
-                        # RESP format: [[key, [[id, [field, value]]]]]
-                        ans = f"*1\r\n*2\r\n${len(key)}\r\n{key}\r\n*{cnt}\r\n{entries}"
-                        writer.write(ans.encode())
-
-                    await writer.drain()
-
-                asyncio.create_task(unblock_after_timeout())
+                    asyncio.create_task(unblock_after_timeout())
 
             else:
                 total = len(elements[2:])
