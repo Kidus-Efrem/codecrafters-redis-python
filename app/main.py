@@ -269,20 +269,25 @@ async def handle_command(reader: asyncio.StreamReader, writer: asyncio.StreamWri
 
         # ---------------- XREAD ----------------
         elif cmd == 'xread':
-            if elements[1] == 'BLOCK':
-                timeout = int(elements[2])
+            if elements[1].lower() == 'block':
+                timeout_ms = int(elements[2])
                 key = elements[4]
-                # start = elements[3]  # assuming start comes from the command
+                start = elements[5]
 
                 async def unblock_after_timeout():
-                    await asyncio.sleep(timeout)
+                    await asyncio.sleep(timeout_ms / 1000)  # Redis uses milliseconds
 
-                    if key in streams:
-                        cnt = 0
-                        entries = ""
-                        for k, v_list in streams[key].items():
-                            # if start < k:
-                            #     cnt += 1
+                    # If there’s no new entry, respond with nil
+                    if key not in streams or not streams[key]:
+                        writer.write(b"*-1\r\n")
+                        await writer.drain()
+                        return
+
+                    entries = ""
+                    cnt = 0
+                    for k, v_list in streams[key].items():
+                        if k > start:  # only entries newer than given ID
+                            cnt += 1
                             field_values = ""
                             for fields in v_list:
                                 field_values += f"*{len(fields)}\r\n"
@@ -290,12 +295,16 @@ async def handle_command(reader: asyncio.StreamReader, writer: asyncio.StreamWri
                                     field_values += f"${len(field)}\r\n{field}\r\n"
                             entries += f"*2\r\n${len(k)}\r\n{k}\r\n{field_values}"
 
-                        ans = f"*2\r\n${len(key)}\r\n{key}\r\n*{cnt}\r\n{entries}"
+                    if cnt == 0:
+                        writer.write(b"*-1\r\n")
+                    else:
+                        # RESP format: [[key, [[id, [field, value]]]]]
+                        ans = f"*1\r\n*2\r\n${len(key)}\r\n{key}\r\n*{cnt}\r\n{entries}"
                         writer.write(ans.encode())
-                        await writer.drain()
+
+                    await writer.drain()
 
                 asyncio.create_task(unblock_after_timeout())
-                writer.write(b"*-1\r\n")
 
             else:
                 total = len(elements[2:])
