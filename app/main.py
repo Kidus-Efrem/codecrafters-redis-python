@@ -12,7 +12,7 @@ d = defaultdict(tuple)       # For key-value store with expiry
 streams = defaultdict(lambda: defaultdict(list))
 lastusedtime = 0
 lastusedseq = defaultdict(int)
-xread_zero_block = defaultdict(str)
+xread_zero_block = defaultdict(list)
 
 async def handle_command(reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
     global lst, remove, d
@@ -232,9 +232,11 @@ async def handle_command(reader: asyncio.StreamReader, writer: asyncio.StreamWri
                 if elements[2] == '*':
                     writer.write(b'$' + str(len(str(sequence)) + 1 + len(str(t))).encode() + b'\r\n' + f'{t}-{sequence}\r\n'.encode())
                 writer.write(f'+{t}-{sequence}\r\n'.encode())
-                if xread_zero_block[elements[1]]:
+                if xread_zero_block[elements[1]] != []:
                     key = elements[1]
-                    start = xread_zero_block[elements[1]]
+
+                    start = xread_zero_block[elements[1]][0]
+                    writer = xread_zero_block[elements[1]][1]
                     if key not in streams or not streams[key]:
                                 writer.write(b"*-1\r\n")
                                 await writer.drain()
@@ -301,7 +303,7 @@ async def handle_command(reader: asyncio.StreamReader, writer: asyncio.StreamWri
                 key = elements[4]
                 start = elements[5]
                 if timeout_ms == 0:
-                    xread_zero_block[key] = start
+                    xread_zero_block[key] = [start, writer]
                 else:
 
                     async def unblock_after_timeout():
