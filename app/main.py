@@ -303,7 +303,7 @@ async def handle_command(reader: asyncio.StreamReader, writer: asyncio.StreamWri
                 key = elements[4]
                 start = elements[5]
                 if start == '$':
-                    start = str(lastusedtime) + '-'+str(lastusedseq[lastusedtime])
+                    start = max(streams[key].keys())
                 if timeout_ms == 0:
                     xread_zero_block[key] = [start, writer]
                 else:
@@ -312,7 +312,7 @@ async def handle_command(reader: asyncio.StreamReader, writer: asyncio.StreamWri
                         await asyncio.sleep(timeout_ms / 1000)  # Redis uses milliseconds
 
                         # If there’s no new entry, respond with nil
-                        if key not in streams or not streams[key]:
+                        if key not in streams or not streams[key] :
                             writer.write(b"*-1\r\n")
                             await writer.drain()
                             return
