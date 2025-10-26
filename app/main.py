@@ -342,7 +342,7 @@ async def handle_command(reader: asyncio.StreamReader, writer: asyncio.StreamWri
                     await writer.drain()
 
                 asyncio.create_task(unblock_after_timeout())
-                return
+               
 
             else:
                 total = len(elements[2:])
