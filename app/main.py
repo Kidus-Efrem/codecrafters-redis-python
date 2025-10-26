@@ -233,6 +233,7 @@ async def handle_command(reader: asyncio.StreamReader, writer: asyncio.StreamWri
                     writer.write(b'$' + str(len(str(sequence)) + 1 + len(str(t))).encode() + b'\r\n' + f'{t}-{sequence}\r\n'.encode())
                 writer.write(f'+{t}-{sequence}\r\n'.encode())
             if xread_zero_block[elements[1]]:
+                key = elements[1]
                 start = xread_zero_block[elements[1]]
                 if key not in streams or not streams[key]:
                             writer.write(b"*-1\r\n")
@@ -299,7 +300,7 @@ async def handle_command(reader: asyncio.StreamReader, writer: asyncio.StreamWri
                 timeout_ms = int(elements[2])
                 key = elements[4]
                 start = elements[5]
-                if timeout_ms == 0:
+                if timeout == 0:
                     xread_zero_block[key] = start
                 else:
 
