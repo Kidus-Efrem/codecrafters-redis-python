@@ -310,38 +310,39 @@ async def handle_command(reader: asyncio.StreamReader, writer: asyncio.StreamWri
                         start = '0-0'
                 if timeout_ms == 0:
                     xread_zero_block[key] = [start, writer]
-                else:
+                    return
 
-                    async def unblock_after_timeout():
-                        await asyncio.sleep(timeout_ms / 1000)  # Redis uses milliseconds
+                async def unblock_after_timeout():
+                    await asyncio.sleep(timeout_ms / 1000)  # Redis uses milliseconds
 
-                        # If there’s no new entry, respond with nil
-                        if key not in streams or not streams[key] :
-                            writer.write(b"*-1\r\n")
-                            await writer.drain()
-                            return
-
-                        entries = ""
-                        cnt = 0
-                        for k, v_list in streams[key].items():
-                            if k > start:  # only entries newer than given ID
-                                cnt += 1
-                                field_values = ""
-                                for fields in v_list:
-                                    field_values += f"*{len(fields)}\r\n"
-                                    for field in fields:
-                                        field_values += f"${len(field)}\r\n{field}\r\n"
-                                entries += f"*2\r\n${len(k)}\r\n{k}\r\n{field_values}"
-
-                        if cnt == 0:
-                            writer.write(b"*-1\r\n")
-                        else:
-                            ans = f"*1\r\n*2\r\n${len(key)}\r\n{key}\r\n*{cnt}\r\n{entries}"
-                            writer.write(ans.encode())
-
+                    # If there’s no new entry, respond with nil
+                    if key not in streams or not streams[key] :
+                        writer.write(b"*-1\r\n")
                         await writer.drain()
+                        return
 
-                    asyncio.create_task(unblock_after_timeout())
+                    entries = ""
+                    cnt = 0
+                    for k, v_list in streams[key].items():
+                        if k > start:  # only entries newer than given ID
+                            cnt += 1
+                            field_values = ""
+                            for fields in v_list:
+                                field_values += f"*{len(fields)}\r\n"
+                                for field in fields:
+                                    field_values += f"${len(field)}\r\n{field}\r\n"
+                            entries += f"*2\r\n${len(k)}\r\n{k}\r\n{field_values}"
+
+                    if cnt == 0:
+                        writer.write(b"*-1\r\n")
+                    else:
+                        ans = f"*1\r\n*2\r\n${len(key)}\r\n{key}\r\n*{cnt}\r\n{entries}"
+                        writer.write(ans.encode())
+
+                    await writer.drain()
+
+                asyncio.create_task(unblock_after_timeout())
+                return
 
             else:
                 total = len(elements[2:])
