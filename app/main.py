@@ -303,7 +303,11 @@ async def handle_command(reader: asyncio.StreamReader, writer: asyncio.StreamWri
                 key = elements[4]
                 start = elements[5]
                 if start == '$':
-                    start = max(streams[key].keys())
+                    if key in streams and streams[key]:
+
+                        start = max(streams[key].keys())
+                    else:
+                        start = '0-0'
                 if timeout_ms == 0:
                     xread_zero_block[key] = [start, writer]
                 else:
