@@ -300,7 +300,7 @@ async def handle_command(reader: asyncio.StreamReader, writer: asyncio.StreamWri
                 timeout_ms = int(elements[2])
                 key = elements[4]
                 start = elements[5]
-                if timeout == 0:
+                if timeout_ms == 0:
                     xread_zero_block[key] = start
                 else:
 
