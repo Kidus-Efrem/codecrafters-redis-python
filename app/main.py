@@ -254,6 +254,9 @@ class RESPBuilder:
 
     def _format_stream_entries(self, entries: List) -> bytes:
         """Format stream entries for RESP response"""
+        if not entries:
+            return b"*0\r\n"
+
         result = f"*{len(entries)}\r\n".encode()
         for entry_id, field_pairs in entries:
             # Each entry is [id, [field1, value1, field2, value2, ...]]
@@ -572,29 +575,15 @@ class AsyncRequestHandler:
                 keys = remaining_args[:half]
                 ids = remaining_args[half:]
 
-                # Get results for all streams
-                results = []
-                for key, start_id in zip(keys, ids):
-                    if key not in self.data_handler.streams:
-                        results.append((key, []))
-                        continue
+                # Get results for all streams using the DataHandler
+                results = self.data_handler.handle_xread(keys, ids)
 
-                    # Handle $ special case
-                    if start_id == '$':
-                        results.append((key, []))
-                        continue
-
-                    entries = []
-                    for entry_id, field_pairs in self.data_handler.streams[key].items():
-                        if self.data_handler._compare_stream_ids(entry_id, start_id) > 0:
-                            entries.append((entry_id, field_pairs))
-
-                    # Sort by ID
-                    entries.sort(key=lambda x: self.data_handler._parse_stream_id(x[0]))
-                    results.append((key, entries))
-
-                # Filter out empty streams
-                non_empty_results = [result for result in results if result[1]]
+                # Filter out empty streams but maintain order
+                non_empty_results = []
+                for result in results:
+                    key, entries = result
+                    if entries:  # Only include streams that have entries
+                        non_empty_results.append(result)
 
                 if non_empty_results:
                     writer.write(self.builder.resp_array(non_empty_results))
