@@ -575,18 +575,44 @@ class AsyncRequestHandler:
                 keys = remaining_args[:half]
                 ids = remaining_args[half:]
 
-                # Get results for all streams using the DataHandler
-                results = self.data_handler.handle_xread(keys, ids)
+                # Get results for all streams
+                results = []
+                for key, start_id in zip(keys, ids):
+                    if key not in self.data_handler.streams:
+                        results.append((key, []))
+                        continue
 
-                # Filter out empty streams but maintain order
-                non_empty_results = []
-                for result in results:
-                    key, entries = result
-                    if entries:  # Only include streams that have entries
-                        non_empty_results.append(result)
+                    # Handle $ special case
+                    if start_id == '$':
+                        results.append((key, []))
+                        continue
 
-                if non_empty_results:
-                    writer.write(self.builder.resp_array(non_empty_results))
+                    entries = []
+                    for entry_id, field_pairs in self.data_handler.streams[key].items():
+                        if self.data_handler._compare_stream_ids(entry_id, start_id) > 0:
+                            entries.append((entry_id, field_pairs))
+
+                    # Sort by ID
+                    entries.sort(key=lambda x: self.data_handler._parse_stream_id(x[0]))
+                    results.append((key, entries))
+
+                # Check if any stream has entries
+                has_entries = any(entries for _, entries in results)
+
+                if has_entries:
+                    # Build the complete response with ALL streams (even empty ones)
+                    response_streams = []
+                    for key, start_id in zip(keys, ids):
+                        entries = []
+                        if key in self.data_handler.streams and start_id != '$':
+                            for entry_id, field_pairs in self.data_handler.streams[key].items():
+                                if self.data_handler._compare_stream_ids(entry_id, start_id) > 0:
+                                    entries.append((entry_id, field_pairs))
+                            # Sort by ID
+                            entries.sort(key=lambda x: self.data_handler._parse_stream_id(x[0]))
+                        response_streams.append((key, entries))
+
+                    writer.write(self.builder.resp_array(response_streams))
                 else:
                     writer.write(self.builder.NULL_ARRAY)
 
