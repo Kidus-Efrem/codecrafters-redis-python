@@ -493,7 +493,7 @@ class AsyncRequestHandler:
             val_id = self.data_handler.handle_xadd(key, stream_id, fields)
             writer.write(self.builder.bulk_str(val_id))
 
-            # CRITICAL FIX: Wake up blocked XREAD clients - learn from first implementation
+            # Wake up blocked XREAD clients
             if key in self.server.xread_blocks:
                 print("RESPONSE FOR A BLOCKING READ")
                 blocked_info = self.server.xread_blocks[key].pop(0)
@@ -538,7 +538,7 @@ class AsyncRequestHandler:
                 if immediate_response:
                     writer.write(immediate_response)
                 else:
-                    # Block the client - learn from first implementation
+                    # Block the client
                     if keys[0] not in self.server.xread_blocks:
                         self.server.xread_blocks[keys[0]] = []
                     self.server.xread_blocks[keys[0]].append((writer, ids[0]))
@@ -555,7 +555,7 @@ class AsyncRequestHandler:
                             print("TIMER PASSED SENDING EMPTY ARRAY")
 
             else:
-                # Non-blocking XREAD
+                # Non-blocking XREAD - FIXED FOR MULTIPLE STREAMS
                 streams_keyword_idx = 0
                 if args[0].upper() == "STREAMS":
                     streams_keyword_idx = 0
@@ -572,8 +572,34 @@ class AsyncRequestHandler:
                 keys = remaining_args[:half]
                 ids = remaining_args[half:]
 
-                results = self.data_handler.handle_xread(keys, ids)
-                writer.write(self.builder.resp_array(results))
+                # Get results for all streams
+                results = []
+                for key, start_id in zip(keys, ids):
+                    if key not in self.data_handler.streams:
+                        results.append((key, []))
+                        continue
+
+                    # Handle $ special case
+                    if start_id == '$':
+                        results.append((key, []))
+                        continue
+
+                    entries = []
+                    for entry_id, field_pairs in self.data_handler.streams[key].items():
+                        if self.data_handler._compare_stream_ids(entry_id, start_id) > 0:
+                            entries.append((entry_id, field_pairs))
+
+                    # Sort by ID
+                    entries.sort(key=lambda x: self.data_handler._parse_stream_id(x[0]))
+                    results.append((key, entries))
+
+                # Filter out empty streams
+                non_empty_results = [result for result in results if result[1]]
+
+                if non_empty_results:
+                    writer.write(self.builder.resp_array(non_empty_results))
+                else:
+                    writer.write(self.builder.NULL_ARRAY)
 
         except Exception as e:
             print(f"XREAD error: {e}")
