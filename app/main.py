@@ -558,7 +558,7 @@ class AsyncRequestHandler:
                             print("TIMER PASSED SENDING EMPTY ARRAY")
 
             else:
-                # Non-blocking XREAD - FIXED FOR MULTIPLE STREAMS
+                # Non-blocking XREAD - COMPLETELY REWRITTEN FOR MULTIPLE STREAMS
                 streams_keyword_idx = 0
                 if args[0].upper() == "STREAMS":
                     streams_keyword_idx = 0
@@ -575,43 +575,35 @@ class AsyncRequestHandler:
                 keys = remaining_args[:half]
                 ids = remaining_args[half:]
 
-                # Get results for all streams
-                results = []
+                # Build the complete response
+                response_streams = []
+
                 for key, start_id in zip(keys, ids):
                     if key not in self.data_handler.streams:
-                        results.append((key, []))
+                        # Stream doesn't exist, include it with empty entries
+                        response_streams.append((key, []))
                         continue
 
                     # Handle $ special case
                     if start_id == '$':
-                        results.append((key, []))
+                        # For $, return empty entries (only new entries after this point)
+                        response_streams.append((key, []))
                         continue
 
+                    # Get entries for this stream that are greater than start_id
                     entries = []
                     for entry_id, field_pairs in self.data_handler.streams[key].items():
                         if self.data_handler._compare_stream_ids(entry_id, start_id) > 0:
                             entries.append((entry_id, field_pairs))
 
-                    # Sort by ID
+                    # Sort entries by ID
                     entries.sort(key=lambda x: self.data_handler._parse_stream_id(x[0]))
-                    results.append((key, entries))
+                    response_streams.append((key, entries))
 
                 # Check if any stream has entries
-                has_entries = any(entries for _, entries in results)
+                has_entries = any(entries for _, entries in response_streams)
 
                 if has_entries:
-                    # Build the complete response with ALL streams (even empty ones)
-                    response_streams = []
-                    for key, start_id in zip(keys, ids):
-                        entries = []
-                        if key in self.data_handler.streams and start_id != '$':
-                            for entry_id, field_pairs in self.data_handler.streams[key].items():
-                                if self.data_handler._compare_stream_ids(entry_id, start_id) > 0:
-                                    entries.append((entry_id, field_pairs))
-                            # Sort by ID
-                            entries.sort(key=lambda x: self.data_handler._parse_stream_id(x[0]))
-                        response_streams.append((key, entries))
-
                     writer.write(self.builder.resp_array(response_streams))
                 else:
                     writer.write(self.builder.NULL_ARRAY)
