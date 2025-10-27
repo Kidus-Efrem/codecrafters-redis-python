@@ -135,7 +135,7 @@ class DataHandler:
             return '0-0'
         return max(self.streams[key].keys(), key=lambda x: self._parse_stream_id(x))
 
-    def handle_xread(self, keys: List[str], ids: List[str], block: bool = False) -> List[Tuple[str, List]]:
+    def handle_xread(self, keys: List[str], ids: List[str]) -> List[Tuple[str, List]]:
         """Handle XREAD command - returns list of (key, entries)"""
         results = []
 
@@ -144,15 +144,11 @@ class DataHandler:
                 results.append((key, []))
                 continue
 
-            # Handle $ special case - only return entries added after current last ID
+            # Handle $ special case - only return entries added after command execution
             if start_id == '$':
-                # For non-blocking XREAD with $, return empty immediately
-                if not block:
-                    results.append((key, []))
-                    continue
-                # For blocking XREAD with $, we'll handle this in the blocking logic
-                # by using the current last ID as the start_id
-                start_id = self.get_last_stream_id(key)
+                # For $, return empty array (only new entries after this point)
+                results.append((key, []))
+                continue
 
             entries = []
             for entry_id, field_pairs in self.streams[key].items():
@@ -497,98 +493,87 @@ class AsyncRequestHandler:
             val_id = self.data_handler.handle_xadd(key, stream_id, fields)
             writer.write(self.builder.bulk_str(val_id))
 
-            # Wake up blocked XREAD clients - CRITICAL FIX
+            # CRITICAL FIX: Wake up blocked XREAD clients - learn from first implementation
             if key in self.server.xread_blocks:
-                # Create a copy of the list to avoid modification during iteration
-                blocked_clients = self.server.xread_blocks[key][:]
-                for blocked_info in blocked_clients:
-                    blocked_writer, blocked_start_id = blocked_info
-
-                    # For $, use the current last ID at time of XREAD
-                    if blocked_start_id == '$':
-                        blocked_start_id = self.data_handler.get_last_stream_id(key)
-
-                    # Check if there are new entries
-                    results = self.data_handler.handle_xread([key], [blocked_start_id])
-                    if results and results[0][1]:  # If there are new entries
-                        # Remove from blocked list
-                        if blocked_info in self.server.xread_blocks[key]:
-                            self.server.xread_blocks[key].remove(blocked_info)
-
-                        # Send response
-                        blocked_writer.write(self.builder.resp_array(results))
-                        await blocked_writer.drain()
-
-                # Clean up empty lists
+                print("RESPONSE FOR A BLOCKING READ")
+                blocked_info = self.server.xread_blocks[key].pop(0)
                 if not self.server.xread_blocks[key]:
                     del self.server.xread_blocks[key]
+
+                blocked_writer, idx = blocked_info
+                print(f"FOUND A BLOCKED XREAD WITH KEY {key} AND {idx}")
+
+                # Create the response with the new entry
+                print(f"RESPONDING WITH {key} AND {val_id} AND {fields}")
+                response = self.builder.resp_array([[key, [[val_id, fields]]]])
+                blocked_writer.write(response)
+                await blocked_writer.drain()
 
         except Exception as e:
             writer.write(self.builder.error(str(e)))
 
     async def handle_xread(self, writer, args):
         try:
-            block_mode = False
-            timeout_ms = 0
-            streams_idx = 0
-
-            # Parse arguments
             if args[0].upper() == "BLOCK":
-                block_mode = True
                 timeout_ms = int(args[1])
-                streams_idx = 3 if len(args) > 2 and args[2].upper() == "STREAMS" else 2
-            elif args[0].upper() == "STREAMS":
-                streams_idx = 1
+                streams_keyword_idx = 2
+                # Find the "STREAMS" keyword
+                for i in range(2, len(args)):
+                    if args[i].upper() == "STREAMS":
+                        streams_keyword_idx = i
+                        break
 
-            # Extract keys and IDs
-            remaining_args = args[streams_idx:]
-            half = len(remaining_args) // 2
-            keys = remaining_args[:half]
-            ids = remaining_args[half:]
+                keys_start = streams_keyword_idx + 1
+                keys = [args[keys_start]]
+                ids = [args[keys_start + 1]]
 
-            # Handle $ for blocking - replace with current last ID
-            processed_ids = []
-            for key, id_val in zip(keys, ids):
-                if id_val == '$' and block_mode:
-                    processed_ids.append(self.data_handler.get_last_stream_id(key))
+                # For $, check if we have data immediately
+                immediate_response = None
+                if ids[0] != '$':
+                    # Check if there's data available for non-$ IDs
+                    results = self.data_handler.handle_xread(keys, ids)
+                    if any(entries for _, entries in results):
+                        immediate_response = self.builder.resp_array(results)
+
+                if immediate_response:
+                    writer.write(immediate_response)
                 else:
-                    processed_ids.append(id_val)
+                    # Block the client - learn from first implementation
+                    if keys[0] not in self.server.xread_blocks:
+                        self.server.xread_blocks[keys[0]] = []
+                    self.server.xread_blocks[keys[0]].append((writer, ids[0]))
 
-            # Check for immediate results
-            results = self.data_handler.handle_xread(keys, processed_ids, block_mode)
-            has_data = any(entries for _, entries in results)
+                    # Set timeout if specified
+                    if timeout_ms > 0:
+                        await asyncio.sleep(timeout_ms / 1000.0)
+                        # If still blocked after timeout, remove from blocking list and send null
+                        if keys[0] in self.server.xread_blocks and (writer, ids[0]) in self.server.xread_blocks[keys[0]]:
+                            self.server.xread_blocks[keys[0]].remove((writer, ids[0]))
+                            if not self.server.xread_blocks[keys[0]]:
+                                del self.server.xread_blocks[keys[0]]
+                            writer.write(self.builder.NULL_ARRAY)
+                            print("TIMER PASSED SENDING EMPTY ARRAY")
 
-            if has_data or not block_mode:
-                # Return immediately if we have data or not in block mode
-                writer.write(self.builder.resp_array(results))
             else:
-                # Block the client
-                for key, original_id in zip(keys, ids):
-                    if key not in self.server.xread_blocks:
-                        self.server.xread_blocks[key] = []
-                    self.server.xread_blocks[key].append((writer, original_id))
+                # Non-blocking XREAD
+                streams_keyword_idx = 0
+                if args[0].upper() == "STREAMS":
+                    streams_keyword_idx = 0
+                else:
+                    # Find the "STREAMS" keyword
+                    for i in range(len(args)):
+                        if args[i].upper() == "STREAMS":
+                            streams_keyword_idx = i
+                            break
 
-                # Set timeout if specified
-                if timeout_ms > 0:
-                    await asyncio.sleep(timeout_ms / 1000.0)
+                keys_start = streams_keyword_idx + 1
+                remaining_args = args[keys_start:]
+                half = len(remaining_args) // 2
+                keys = remaining_args[:half]
+                ids = remaining_args[half:]
 
-                    # Check if still blocked and no data arrived
-                    still_blocked = any(
-                        (writer, original_id) in self.server.xread_blocks.get(key, [])
-                        for key, original_id in zip(keys, ids)
-                    )
-
-                    if still_blocked:
-                        # Remove from blocked lists
-                        for key, original_id in zip(keys, ids):
-                            if key in self.server.xread_blocks:
-                                if (writer, original_id) in self.server.xread_blocks[key]:
-                                    self.server.xread_blocks[key].remove((writer, original_id))
-                                if not self.server.xread_blocks[key]:
-                                    del self.server.xread_blocks[key]
-
-                        # Send null response
-                        writer.write(self.builder.NULL_ARRAY)
+                results = self.data_handler.handle_xread(keys, ids)
+                writer.write(self.builder.resp_array(results))
 
         except Exception as e:
             print(f"XREAD error: {e}")
