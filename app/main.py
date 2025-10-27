@@ -1,14 +1,14 @@
 import asyncio
 import time
 from collections import defaultdict, deque
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Any
 import traceback
 
 class DataHandler:
     _instance = None
 
     def __init__(self):
-        self.strings: Dict[str, Tuple[str, float]] = {}  # key: (value, expiry)
+        self.strings: Dict[str, Tuple[str, float]] = {}
         self.lists: Dict[str, List[str]] = defaultdict(list)
         self.streams: Dict[str, Dict[str, List[List[str]]]] = defaultdict(dict)
         self.last_used_seq: Dict[int, int] = {}
@@ -62,7 +62,6 @@ class DataHandler:
         arr = self.lists[key]
         n = len(arr)
 
-        # Handle negative indices
         if start < 0:
             start += n
         if end < 0:
@@ -90,17 +89,30 @@ class DataHandler:
             stream_id = f"{current_time}-{sequence}"
         else:
             # Parse manual ID
-            if '-' in stream_id:
-                ts_part, seq_part = stream_id.split('-')
+            parts = stream_id.split('-')
+            if len(parts) == 2:
+                ts_part, seq_part = parts
                 current_time = int(ts_part) if ts_part else int(time.time() * 1000)
-                sequence = int(seq_part) if seq_part != '*' else 0
-
-                if current_time in self.last_used_seq:
-                    if sequence <= self.last_used_seq[current_time]:
+                if seq_part == '*':
+                    if current_time in self.last_used_seq:
                         sequence = self.last_used_seq[current_time] + 1
+                    else:
+                        sequence = 0
+                else:
+                    sequence = int(seq_part)
             else:
                 current_time = int(stream_id)
                 sequence = 0
+
+        # Validate ID
+        if current_time == 0 and sequence == 0:
+            raise Exception("The ID specified in XADD must be greater than 0-0")
+
+        if current_time < self.last_used_time:
+            raise Exception("The ID specified in XADD is equal or smaller than the target stream top item")
+
+        if current_time == self.last_used_time and sequence <= self.last_used_seq.get(current_time, -1):
+            raise Exception("The ID specified in XADD is equal or smaller than the target stream top item")
 
         # Update sequence tracking
         self.last_used_time = current_time
@@ -117,27 +129,41 @@ class DataHandler:
         self.streams[key][final_id] = field_pairs
         return final_id
 
-    def handle_xread(self, key: str, start_id: str) -> Tuple[str, List]:
-        """Returns (key, [(entry_id, field_pairs), ...]) for entries > start_id"""
-        if key not in self.streams:
-            return (key, [])
+    def get_last_stream_id(self, key: str) -> str:
+        """Get the last ID in a stream, returns '0-0' if stream doesn't exist"""
+        if not self.streams[key]:
+            return '0-0'
+        return max(self.streams[key].keys(), key=lambda x: self._parse_stream_id(x))
 
-        # Handle $ special case - get entries after the last one
-        if start_id == '$':
-            if self.streams[key]:
-                # $ means only return new entries, so return empty
-                return (key, [])
-            else:
-                start_id = '0-0'
+    def handle_xread(self, keys: List[str], ids: List[str], block: bool = False) -> List[Tuple[str, List]]:
+        """Handle XREAD command - returns list of (key, entries)"""
+        results = []
 
-        entries = []
-        for entry_id, field_pairs in self.streams[key].items():
-            if self._compare_stream_ids(entry_id, start_id) > 0:
-                entries.append((entry_id, field_pairs))
+        for key, start_id in zip(keys, ids):
+            if key not in self.streams:
+                results.append((key, []))
+                continue
 
-        # Sort by ID
-        entries.sort(key=lambda x: self._parse_stream_id(x[0]))
-        return (key, entries)
+            # Handle $ special case - only return entries added after current last ID
+            if start_id == '$':
+                # For non-blocking XREAD with $, return empty immediately
+                if not block:
+                    results.append((key, []))
+                    continue
+                # For blocking XREAD with $, we'll handle this in the blocking logic
+                # by using the current last ID as the start_id
+                start_id = self.get_last_stream_id(key)
+
+            entries = []
+            for entry_id, field_pairs in self.streams[key].items():
+                if self._compare_stream_ids(entry_id, start_id) > 0:
+                    entries.append((entry_id, field_pairs))
+
+            # Sort by ID
+            entries.sort(key=lambda x: self._parse_stream_id(x[0]))
+            results.append((key, entries))
+
+        return results
 
     def handle_xrange(self, key: str, start_id: str, end_id: str) -> List:
         if key not in self.streams:
@@ -212,8 +238,8 @@ class RESPBuilder:
         return f"-ERR {msg}\r\n".encode()
 
     def resp_array(self, elements: List) -> bytes:
-        if not elements:
-            return b"*0\r\n"
+        if elements is None:
+            return self.NULL_ARRAY
 
         result = f"*{len(elements)}\r\n".encode()
 
@@ -223,16 +249,22 @@ class RESPBuilder:
             elif isinstance(element, int):
                 result += self.integer(element)
             elif isinstance(element, list):
-                # Nested array
                 result += self.resp_array(element)
             elif isinstance(element, tuple):
-                # Handle (key, [(id, fields)]) format for streams
+                # Handle stream response format: (key, [(id, field_pairs), ...])
                 key, entries = element
-                result += self.resp_array([key, self.resp_array([
-                    self.resp_array([entry_id, self.resp_array([
-                        item for pair in field_pairs for item in pair
-                    ])]) for entry_id, field_pairs in entries
-                ])])
+                result += self.resp_array([key, self._format_stream_entries(entries)])
+        return result
+
+    def _format_stream_entries(self, entries: List) -> bytes:
+        """Format stream entries for RESP response"""
+        result = f"*{len(entries)}\r\n".encode()
+        for entry_id, field_pairs in entries:
+            # Each entry is [id, [field1, value1, field2, value2, ...]]
+            flattened_fields = []
+            for pair in field_pairs:
+                flattened_fields.extend(pair)
+            result += self.resp_array([entry_id, self.resp_array(flattened_fields)])
         return result
 
 class RESPParser:
@@ -338,15 +370,15 @@ class AsyncRequestHandler:
                 elif cmd == "XREAD":
                     await self.handle_xread(writer, args)
                 elif cmd == "COMMAND":
-                    await self.handle_ping(writer)  # Just respond with PONG for now
+                    await self.handle_ping(writer)
                 else:
-                    writer.write(self.builder.error(f"Unknown command {cmd}").encode())
+                    writer.write(self.builder.error(f"Unknown command {cmd}"))
 
                 await writer.drain()
 
         except Exception as e:
             print(traceback.format_exc())
-            writer.write(self.builder.error(str(e)).encode())
+            writer.write(self.builder.error(str(e)))
             await writer.drain()
 
     async def handle_ping(self, writer):
@@ -465,69 +497,101 @@ class AsyncRequestHandler:
             val_id = self.data_handler.handle_xadd(key, stream_id, fields)
             writer.write(self.builder.bulk_str(val_id))
 
-            # Wake up blocked XREAD clients
+            # Wake up blocked XREAD clients - CRITICAL FIX
             if key in self.server.xread_blocks:
-                for blocked_info in self.server.xread_blocks[key]:
-                    blocked_writer, start_id = blocked_info
-                    res = self.data_handler.handle_xread(key, start_id)
-                    if res[1]:  # If there are new entries
-                        blocked_writer.write(self.builder.resp_array([res]))
+                # Create a copy of the list to avoid modification during iteration
+                blocked_clients = self.server.xread_blocks[key][:]
+                for blocked_info in blocked_clients:
+                    blocked_writer, blocked_start_id = blocked_info
+
+                    # For $, use the current last ID at time of XREAD
+                    if blocked_start_id == '$':
+                        blocked_start_id = self.data_handler.get_last_stream_id(key)
+
+                    # Check if there are new entries
+                    results = self.data_handler.handle_xread([key], [blocked_start_id])
+                    if results and results[0][1]:  # If there are new entries
+                        # Remove from blocked list
+                        if blocked_info in self.server.xread_blocks[key]:
+                            self.server.xread_blocks[key].remove(blocked_info)
+
+                        # Send response
+                        blocked_writer.write(self.builder.resp_array(results))
                         await blocked_writer.drain()
-                del self.server.xread_blocks[key]
+
+                # Clean up empty lists
+                if not self.server.xread_blocks[key]:
+                    del self.server.xread_blocks[key]
 
         except Exception as e:
             writer.write(self.builder.error(str(e)))
 
     async def handle_xread(self, writer, args):
         try:
+            block_mode = False
+            timeout_ms = 0
+            streams_idx = 0
+
+            # Parse arguments
             if args[0].upper() == "BLOCK":
+                block_mode = True
                 timeout_ms = int(args[1])
-                streams_idx = 3 if args[2].upper() == "STREAMS" else 2
-                keys = [args[streams_idx]]
-                ids = [args[streams_idx + 1]]
+                streams_idx = 3 if len(args) > 2 and args[2].upper() == "STREAMS" else 2
+            elif args[0].upper() == "STREAMS":
+                streams_idx = 1
 
-                # Check for immediate results
-                results = []
-                immediate_data = False
+            # Extract keys and IDs
+            remaining_args = args[streams_idx:]
+            half = len(remaining_args) // 2
+            keys = remaining_args[:half]
+            ids = remaining_args[half:]
 
-                for key, start_id in zip(keys, ids):
-                    res = self.data_handler.handle_xread(key, start_id)
-                    if res[1]:  # If there are entries
-                        immediate_data = True
-                    results.append(res)
+            # Handle $ for blocking - replace with current last ID
+            processed_ids = []
+            for key, id_val in zip(keys, ids):
+                if id_val == '$' and block_mode:
+                    processed_ids.append(self.data_handler.get_last_stream_id(key))
+                else:
+                    processed_ids.append(id_val)
 
-                if immediate_data:
-                    writer.write(self.builder.resp_array(results))
-                    return
+            # Check for immediate results
+            results = self.data_handler.handle_xread(keys, processed_ids, block_mode)
+            has_data = any(entries for _, entries in results)
 
+            if has_data or not block_mode:
+                # Return immediately if we have data or not in block mode
+                writer.write(self.builder.resp_array(results))
+            else:
                 # Block the client
-                for key, start_id in zip(keys, ids):
+                for key, original_id in zip(keys, ids):
                     if key not in self.server.xread_blocks:
                         self.server.xread_blocks[key] = []
-                    self.server.xread_blocks[key].append((writer, start_id))
+                    self.server.xread_blocks[key].append((writer, original_id))
 
-                # Set timeout
+                # Set timeout if specified
                 if timeout_ms > 0:
-                    await asyncio.sleep(timeout_ms / 1000)
-                    # If still blocked after timeout, send empty array
-                    writer.write(self.builder.NULL_ARRAY)
+                    await asyncio.sleep(timeout_ms / 1000.0)
 
-            else:
-                # Non-blocking XREAD
-                streams_idx = 1 if args[0].upper() == "STREAMS" else 0
-                remaining_args = args[streams_idx:]
-                half = len(remaining_args) // 2
-                keys = remaining_args[:half]
-                ids = remaining_args[half:]
+                    # Check if still blocked and no data arrived
+                    still_blocked = any(
+                        (writer, original_id) in self.server.xread_blocks.get(key, [])
+                        for key, original_id in zip(keys, ids)
+                    )
 
-                results = []
-                for key, start_id in zip(keys, ids):
-                    res = self.data_handler.handle_xread(key, start_id)
-                    results.append(res)
+                    if still_blocked:
+                        # Remove from blocked lists
+                        for key, original_id in zip(keys, ids):
+                            if key in self.server.xread_blocks:
+                                if (writer, original_id) in self.server.xread_blocks[key]:
+                                    self.server.xread_blocks[key].remove((writer, original_id))
+                                if not self.server.xread_blocks[key]:
+                                    del self.server.xread_blocks[key]
 
-                writer.write(self.builder.resp_array(results))
+                        # Send null response
+                        writer.write(self.builder.NULL_ARRAY)
 
         except Exception as e:
+            print(f"XREAD error: {e}")
             writer.write(self.builder.error(str(e)))
 
     async def handle_xrange(self, writer, args):
