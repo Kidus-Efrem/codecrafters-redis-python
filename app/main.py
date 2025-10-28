@@ -197,67 +197,78 @@ async def handle_command(reader: asyncio.StreamReader, writer: asyncio.StreamWri
         # ---------------- XADD ----------------
         elif cmd == 'xadd':
             global lastusedtime
-            if len(elements[2]) == 1:
+            stream_key = elements[1]
+            entry_id = elements[2]
+
+            # Parse or generate entry ID
+            if '-' in entry_id:
+                t_str, seq_str = entry_id.split('-')
+                if t_str == '0':
+                    t = 0
+                else:
+                    t = int(t_str) if t_str != '*' else time.time_ns() // 1000000
+
+                if seq_str == '*':
+                    if t in lastusedseq:
+                        sequence = lastusedseq[t] + 1
+                    else:
+                        sequence = 0
+                else:
+                    sequence = int(seq_str)
+            else:
+                # Handle case where ID doesn't have '-'
                 t = time.time_ns() // 1000000
                 if t in lastusedseq:
                     sequence = lastusedseq[t] + 1
                 else:
                     sequence = 0
-            else:
-                t, sequence = elements[2].split('-')
-                t = int(t)
 
-                if sequence == "*":
-                    if t in lastusedseq:
-                        sequence = lastusedseq[t] + 1
-                    else:
-                        sequence = 0
-                        if t == 0:
-                            sequence += 1
-
-                sequence = int(sequence)
-            if sequence == '*':
-                writer.write(b"hell no")
-            elif t == sequence and t == 0:
+            # Validate the ID
+            if t == 0 and sequence == 0:
                 writer.write(b'-ERR The ID specified in XADD must be greater than 0-0\r\n')
-            elif t < lastusedtime:
+                await writer.drain()
+                continue
+
+            if t < lastusedtime or (t == lastusedtime and sequence <= lastusedseq.get(lastusedtime, -1)):
                 writer.write(b'-ERR The ID specified in XADD is equal or smaller than the target stream top item\r\n')
-            elif t == lastusedtime and sequence <= lastusedseq[lastusedtime]:
-                writer.write(b'-ERR The ID specified in XADD is equal or smaller than the target stream top item\r\n')
-            else:
-                lastusedtime = t
-                lastusedseq[lastusedtime] = sequence
-                streams[elements[1]][f"{t}-{sequence}"].append([elements[3], elements[4]])
+                await writer.drain()
+                continue
 
-                writer.write(f"+{t}-{sequence}\r\n".encode())
+            # Store the entry
+            lastusedtime = t
+            lastusedseq[lastusedtime] = sequence
+            final_id = f"{t}-{sequence}"
+            streams[stream_key][final_id].append([elements[3], elements[4]])
 
-                # Check if any blocked XREAD clients need to be notified
-                if elements[1] in xread_zero_block and xread_zero_block[elements[1]]:
-                    blocked_data = xread_zero_block[elements[1]]
-                    if isinstance(blocked_data, list) and len(blocked_data) >= 2:
-                        blocked_start, blocked_writer = blocked_data
-                        key = elements[1]
+            writer.write(f"+{final_id}\r\n".encode())
+            await writer.drain()
 
-                        # Send new entry to blocked client
-                        entries = ""
-                        cnt = 0
-                        for k, v_list in streams[key].items():
-                            if k > blocked_start:  # only entries newer than given ID
-                                cnt += 1
-                                field_values = ""
-                                for fields in v_list:
-                                    field_values += f"*{len(fields)}\r\n"
-                                    for field in fields:
-                                        field_values += f"${len(field)}\r\n{field}\r\n"
-                                entries += f"*2\r\n${len(k)}\r\n{k}\r\n{field_values}"
+            # Check if any blocked XREAD clients need to be notified
+            if stream_key in xread_zero_block and xread_zero_block[stream_key]:
+                blocked_data = xread_zero_block[stream_key]
+                if isinstance(blocked_data, list) and len(blocked_data) >= 2:
+                    blocked_start, blocked_writer = blocked_data
 
-                        if cnt > 0:
-                            ans = f"*1\r\n*2\r\n${len(key)}\r\n{key}\r\n*{cnt}\r\n{entries}"
-                            blocked_writer.write(ans.encode())
-                            await blocked_writer.drain()
+                    # Send new entry to blocked client
+                    entries = ""
+                    cnt = 0
+                    for k, v_list in streams[stream_key].items():
+                        if k > blocked_start:  # only entries newer than given ID
+                            cnt += 1
+                            field_values = ""
+                            for fields in v_list:
+                                field_values += f"*{len(fields)}\r\n"
+                                for field in fields:
+                                    field_values += f"${len(field)}\r\n{field}\r\n"
+                            entries += f"*2\r\n${len(k)}\r\n{k}\r\n{field_values}"
 
-                        # Remove from blocked list
-                        xread_zero_block[elements[1]] = []
+                    if cnt > 0:
+                        ans = f"*1\r\n*2\r\n${len(stream_key)}\r\n{stream_key}\r\n*{cnt}\r\n{entries}"
+                        blocked_writer.write(ans.encode())
+                        await blocked_writer.drain()
+
+                    # Remove from blocked list
+                    xread_zero_block[stream_key] = []
 
         # ---------------- XRANGE ----------------
         elif cmd == 'xrange':
@@ -304,20 +315,22 @@ async def handle_command(reader: asyncio.StreamReader, writer: asyncio.StreamWri
                 # Convert $ to current max ID
                 if start == '$':
                     if key in streams and streams[key]:
-                        start = max(streams[key].keys())
+                        start_id = max(streams[key].keys())
                     else:
-                        start = '0-0'
+                        start_id = '0-0'
+                else:
+                    start_id = start
 
-                # FIRST: Check if entries already exist that are newer than start
+                # Check if entries already exist that are newer than start
                 new_entries = []
                 if key in streams and streams[key]:
                     for entry_id, fields_list in streams[key].items():
-                        if entry_id > start:
+                        if entry_id > start_id:
                             new_entries.append((entry_id, fields_list))
 
                 # If entries are available NOW, return them immediately
                 if new_entries:
-                    # Format and send the response immediately using existing logic
+                    # Format and send the response immediately
                     entries = ""
                     cnt = 0
                     for k, v_list in new_entries:
@@ -332,14 +345,15 @@ async def handle_command(reader: asyncio.StreamReader, writer: asyncio.StreamWri
                     response = f"*1\r\n*2\r\n${len(key)}\r\n{key}\r\n*{cnt}\r\n{entries}"
                     writer.write(response.encode())
                     await writer.drain()
-                    return
+                    continue
 
                 # Only wait if no entries are available
                 if timeout_ms == 0:
-                    xread_zero_block[key] = [start, writer]
-                    return
+                    xread_zero_block[key] = [start_id, writer]
+                    # Don't send response now - wait for XADD to notify
+                    continue
 
-                # Create timeout task only when we actually need to wait
+                # For non-zero timeout, wait and then respond
                 async def unblock_after_timeout():
                     await asyncio.sleep(timeout_ms / 1000)
 
@@ -347,7 +361,7 @@ async def handle_command(reader: asyncio.StreamReader, writer: asyncio.StreamWri
                     final_entries = []
                     if key in streams and streams[key]:
                         for entry_id, fields_list in streams[key].items():
-                            if entry_id > start:
+                            if entry_id > start_id:
                                 final_entries.append((entry_id, fields_list))
 
                     if final_entries:
@@ -373,6 +387,7 @@ async def handle_command(reader: asyncio.StreamReader, writer: asyncio.StreamWri
                 asyncio.create_task(unblock_after_timeout())
 
             else:
+                # Non-blocking XREAD
                 total = len(elements[2:])
                 half = total // 2
                 keys = elements[2:2 + half]
