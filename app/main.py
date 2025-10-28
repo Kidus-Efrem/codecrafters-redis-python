@@ -471,7 +471,7 @@ async def handle_command(reader: asyncio.StreamReader, writer: asyncio.StreamWri
             if writer not in multi_con:
                 writer.write(b'-ERR EXEC without MULTI\r\n')
             else:
-                multi = False
+                multi_con.remove(writer)
                 writer.write(b'*0\r\n')
 
 
