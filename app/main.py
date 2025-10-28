@@ -474,13 +474,13 @@ async def handle_command(reader: asyncio.StreamReader, writer: asyncio.StreamWri
                 multi = False
                 writer.write(b'*0\r\n')
 
- 
+
 
 
         # ---------------- UNKNOWN -------------- --
         else:
             writer.write(b"-ERR unknown command\r\n")
-
+ 
         await writer.drain()
 
     writer.close()
