@@ -17,7 +17,7 @@ multi_deque = deque()
 
 
 async def handle_command(reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
-    global lst, remove, d
+    global lst, remove, d, multi
 
     while True:
         chunk = await reader.read(BUF_SIZE)
@@ -46,6 +46,7 @@ async def handle_command(reader: asyncio.StreamReader, writer: asyncio.StreamWri
         if multi == True:
 
             multi_deque.append(elements)
+            writer.write(b'QUEUED\r\n')
         # ---------------- PING ----------------
         elif cmd == 'ping':
             writer.write(b"+PONG\r\n")
