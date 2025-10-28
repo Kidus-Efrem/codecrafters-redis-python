@@ -12,7 +12,7 @@ streams = defaultdict(lambda: defaultdict(list))
 lastusedtime = 0
 lastusedseq = defaultdict(int)
 xread_zero_block = defaultdict(list)
-multi_con = defaultdict(False)
+multi_con = []
 multi_deque = deque()
 
 
@@ -465,7 +465,7 @@ async def handle_command(reader: asyncio.StreamReader, writer: asyncio.StreamWri
 
             # d[key] = (value, expiry)
         elif cmd == 'multi':
-            multi_con[writer] = True
+            multi_con.append(writer)
             writer.write(b"+OK\r\n")
         elif cmd == 'exec':
             if not multi:
