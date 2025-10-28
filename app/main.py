@@ -477,7 +477,7 @@ async def handle_command(reader: asyncio.StreamReader, writer: asyncio.StreamWri
 
 
 
-        # ---------------- UNKNOWN -------------- -- 
+        # ---------------- UNKNOWN -------------- --
         else:
             writer.write(b"-ERR unknown command\r\n")
 
@@ -485,7 +485,7 @@ async def handle_command(reader: asyncio.StreamReader, writer: asyncio.StreamWri
 
     writer.close()
     await writer.wait_closed()
-
+ 
 
 
 async def main():
