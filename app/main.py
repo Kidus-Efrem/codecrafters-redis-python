@@ -470,6 +470,10 @@ async def handle_command(reader: asyncio.StreamReader, writer: asyncio.StreamWri
         elif cmd == 'exec':
             if not multi:
                 writer.write(b'-ERR EXEC without MULTI\r\n')
+            else:
+                multi = False
+                writer.write(b'*0\r\n')
+
 
 
 
