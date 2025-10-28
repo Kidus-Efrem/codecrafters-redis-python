@@ -466,7 +466,7 @@ async def handle_command(reader: asyncio.StreamReader, writer: asyncio.StreamWri
             # d[key] = (value, expiry)
         elif cmd == 'multi':
             multi = True
-            writer.write("+OK\r\n")
+            writer.write(b"+OK\r\n")
 
 
         # ---------------- UNKNOWN ----------------
