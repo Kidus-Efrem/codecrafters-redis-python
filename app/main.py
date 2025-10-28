@@ -1,229 +1,422 @@
-import traceback
-from app.DataHandler import DataHandler
-from app.RESPParser import RESPParser
-from app.RESPBuilder import RESPBuilder
+import asyncio
 import time
+from collections import defaultdict, deque
 
-class RequestHandler:
+BUF_SIZE = 4096
 
-    _instance = None
+# Global data stores
+lst = defaultdict(list)      # For Redis lists
+remove = defaultdict(deque)  # For blocked clients (key → deque of writers)
+d = defaultdict(tuple)       # For key-value store with expiry
+streams = defaultdict(lambda: defaultdict(list))
+lastusedtime = 0
+lastusedseq = defaultdict(int)
+xread_zero_block = defaultdict(list)
 
-    def __init__(self, server):
-        self.server = server
-        self.data_handler = DataHandler.get_instance()
-        self.parser = RESPParser()
-        self.builder = RESPBuilder()
 
-    @classmethod
-    def get_instance(cls):
-        if cls._instance is None:
-            cls._instance = cls()
-        return cls._instance
+async def handle_command(reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
+    global lst, remove, d
 
-    def handle_request(self, conn, buf):
-        try:
-            reqs, _ = self.parser.parse(buf)
-            req = reqs[0]
-            print(f"{req['cmd']} WITH {req['args']}")
-            if req["cmd"] == "ECHO":
-                self.handle_echo(conn, req["args"])
-            elif req["cmd"] == "SET":
-                self.handle_set(conn, req["args"], opts=req["opts"])
-            elif req["cmd"] == "GET":
-                self.handle_get(conn, req["args"])
-            elif req["cmd"] == "RPUSH":
-                self.handle_rpush(conn, req["args"])
-            elif req["cmd"] == "LPUSH":
-                self.handle_lpush(conn, req["args"])
-            elif req["cmd"] == "LLEN":
-                self.handle_llen(conn, req["args"])
-            elif req["cmd"] == "LPOP":
-                self.handle_lpop(conn, req["args"])
-            elif req["cmd"] == "LRANGE":
-                self.handle_lrange(conn, req["args"])
-            elif req["cmd"] == "BLPOP":
-                self.handle_blpop(conn, req["args"])
-            elif req["cmd"] == "TYPE":
-                self.handle_type(conn, req["args"])
-            elif req["cmd"] == "XADD":
-                self.handle_xadd(conn, req["args"])
-            elif req["cmd"] == "XRANGE":
-                self.handle_xrange(conn, req["args"])
-            elif req["cmd"] == "XREAD":
-                self.handle_xread(conn, req["args"])
-            elif req["cmd"] == "PING" or req["cmd"] == "COMMAND":
-                conn.sendall(self.builder.PONG.encode())
-        except Exception as e:
-            print(traceback.format_exc())
+    while True:
+        chunk = await reader.read(BUF_SIZE)
+        if not chunk:
+            break
 
-    # $<length>\r\n<data>\r\n
-    def handle_echo(self, conn, args):
-        s = args[0]
-        conn.sendall(self.builder.bulk_str(val=s).encode())
+        i = 0
+        if chunk[i] == ord('*'):
+            i += 1
+            j = chunk.find(b'\r\n', i)
+            arrlen = int(chunk[i:j])
+        i = j + 2
+        elements = []
+        for _ in range(arrlen):
+            if chunk[i] == ord('$'):
+                i += 1
+                j = chunk.find(b'\r\n', i)
+                wlen = int(chunk[i:j])
+                i = j + 2
+                element = chunk[i:i + wlen]
+                i += wlen + 2
+                elements.append(element.decode())
 
-    def handle_set(self, conn, args, opts=None):
-        try:
-            key, val = args
-            self.data_handler.handle_set(key, val, opts)
-            conn.sendall(self.builder.SIMPLE_STR.encode())
-        except Exception as e:
-            print(traceback.format_exc())
-            conn.sendall(self.builder.NULL_BULK_STR.encode())
+        print(elements)
+        cmd = elements[0].lower()
 
-    def handle_rpush(self, conn, args):
-        try:
-            key, vals = args[0], args[1:]
-            length = self.data_handler.handle_list_set(key, vals)
-            conn.sendall(self.builder.integer(length).encode())
-            if key in self.server.blocks:
-                conn = self.server.blocks[key].pop(0)
-                if len(self.server.blocks[key]) == 0:
-                    del self.server.blocks[key]
-                res = self.data_handler.handle_lpop(key, 1)
-                if res is None:
-                    conn.sendall(self.builder.EMPTY_RESP_ARRAY.encode())
-                conn.sendall(self.builder.resp_array([key, res[0]]).encode())
-        except Exception as e:
-            print(traceback.format_exc())
-            conn.sendall(self.builder.NULL_BULK_STR.encode())
+        # ---------------- PING ----------------
+        if cmd == 'ping':
+            writer.write(b"+PONG\r\n")
 
-    def handle_lpush(self, conn, args):
-        try:
-            key, vals = args[0], args[1:]
-            length = self.data_handler.handle_list_set(key, vals, append=False)
-            conn.sendall(self.builder.integer(length).encode())
-            if key in self.server.blocks:
-                conn = self.server.blocks[key].pop(0)
-                if len(self.server.blocks[key]) == 0:
-                    del self.server.blocks[key]
-                res = self.data_handler.handle_lpop(key, 1)
-                conn.sendall(self.builder.resp_array([key, res[0]]).encode())
-        except Exception as e:
-            print(traceback.format_exc())
-            conn.sendall(self.builder.NULL_BULK_STR.encode())
+        # ---------------- ECHO ----------------
+        elif cmd == 'echo':
+            msg = elements[1]
+            writer.write(b"$" + str(len(msg)).encode() + b"\r\n" + msg.encode() + b"\r\n")
 
-    def handle_lrange(self, conn, args):
-        try:
-            key, idxmin, idxmax = args[0], int(args[1]), int(args[2])
-            res = self.data_handler.handle_lrange(key, idxmin, idxmax)
-            print(res)
-            conn.sendall(self.builder.resp_array(res).encode())
-        except Exception as e:
-            print(traceback.format_exc())
-            conn.sendall(self.builder.NULL_BULK_STR.encode())
+        # ---------------- SET ----------------
+        elif cmd == 'set':
+            key, value = elements[1], elements[2]
+            expiry = float('inf')
 
-    def handle_llen(self, conn, args):
-        key = args[0]
-        res = self.data_handler.handle_llen(key)
-        conn.sendall(self.builder.integer(res).encode())
+            if len(elements) >= 5 and elements[3].upper() == 'PX':
+                expiry = time.time() + int(elements[4]) / 1000
 
-    def handle_lpop(self, conn, args):
-        key, val = args[0], int(args[1]) if len(args) == 2 else 1
-        res = self.data_handler.handle_lpop(key, val)
-        if res is None or len(res) == 0:
-            conn.sendall(self.builder.NULL_BULK_STR.encode())
-        elif len(res) == 1:
-            conn.sendall(self.builder.bulk_str(res[0]).encode())
-        else:
-            conn.sendall(self.builder.resp_array(res).encode())
+            d[key] = (value, expiry)
+            writer.write(b"+OK\r\n")
 
-    def handle_blpop(self, conn, args):
-        key, val = args[0], float(args[1]) if len(args) == 2 else 0
-        if key in self.data_handler and self.data_handler[key].length > 0:
-            res = self.data_handler.handle_lpop(key, 1)
-            conn.sendall(self.builder.resp_array([key, res[0]]).encode())
-        else:
-            if key not in self.server.blocks:
-                self.server.blocks[key] = []
-            self.server.blocks[key].append(conn)
-            idx = len(self.server.blocks[key])-1
-            if val != 0:
-                time.sleep(val)
-                del self.server.blocks[key][idx]
-                conn.sendall(self.builder.NULL_ARRAY.encode())
+        # ---------------- GET ----------------
+        elif cmd == 'get':
+            key = elements[1]
+            if key in d:
+                val, expiry = d[key]
+                if expiry < time.time():
+                    del d[key]
+                    writer.write(b"$-1\r\n")
+                else:
+                    writer.write(f"${len(val)}\r\n{val}\r\n".encode())
+            else:
+                writer.write(b"$-1\r\n")
 
-    def handle_xadd(self, conn, args):
-        key, id, vals = args[0], args[1], args[2:]
-        try:
-            val_id = self.data_handler.handle_xadd(key, id, vals)
-            conn.sendall(self.builder.bulk_str(val_id).encode())
-            if key in self.server.xread_blocks:
-                print("RESPONSE FOR A BLOCKING REAAD")
-                newconn, idx = self.server.xread_blocks[key].pop(0)
-                print(f"FOUND A BLOCKED  XREAD WITH KEY {key} AND {idx}")
-                if len(self.server.xread_blocks[key]) == 0:
-                    del self.server.xread_blocks[key]
-                print(f"RESPONDING WITH {key} AND {val_id} AND {vals}")
-                newconn.sendall(self.builder.resp_array([[key, [[val_id, vals]]]]).encode())
-        except Exception as e:
-            print(e)
-            print(traceback.format_exc())
-            conn.sendall(self.builder.error(e).encode())
+        # ---------------- RPUSH ----------------
+        elif cmd == 'rpush':
+            key = elements[1]
+            for v in elements[2:]:
+                lst[key].append(v)
+            writer.write(f":{len(lst[key])}\r\n".encode())
 
-    def handle_xread(self, conn, args):
-        try:
-            if args[0].lower() == "block":
-                _, ms, _, key, idx = args[0], int(args[1]), args[2], args[3], args[4]
-                if key in self.data_handler and idx != '$':
-                    res = self.data_handler.handle_xread(key, idx)
-                    if len(res[1]) != 0:
-                        return conn.sendall(self.builder.resp_array([res]).encode())
-                if key not in self.server.xread_blocks:
-                    self.server.xread_blocks[key] = []
-                self.server.xread_blocks[key].append((conn, idx))
-                idx = len(self.server.xread_blocks[key])-1
-                print(f"index {idx} with block for {ms}")
-                if ms != 0:
-                    time.sleep(ms//1000)
-                    conn.sendall(self.builder.NULL_ARRAY.encode())
-                    print(f"TIMER PASSED SENDING EMPTY ARRAY")
-                    del self.server.xread_blocks[key][idx]
+            # Wake up first blocked client (if any)
+            if key in remove and remove[key]:
+                blocked_writer = remove[key].popleft()
+                if lst[key]:
+                    element = lst[key].pop(0)
+                    resp = (
+                        f"*2\r\n${len(key)}\r\n{key}\r\n"
+                        f"${len(element)}\r\n{element}\r\n"
+                    ).encode()
+                    blocked_writer.write(resp)
+                    await blocked_writer.drain()
+
+        # ---------------- LPUSH ----------------
+        elif cmd == 'lpush':
+            key = elements[1]
+            for v in elements[2:]:
+                lst[key].insert(0, v)
+            writer.write(f":{len(lst[key])}\r\n".encode())
+
+        # ---------------- LLEN ----------------
+        elif cmd == 'llen':
+            key = elements[1]
+            writer.write(f":{len(lst[key])}\r\n".encode())
+
+        # ---------------- LRANGE ----------------
+        elif cmd == 'lrange':
+            key = elements[1]
+            start = int(elements[2])
+            end = int(elements[3])
+            arr = lst[key]
+            n = len(arr)
+
+            if start < 0:
+                start += n
+            if end < 0:
+                end += n
+            start = max(0, start)
+            end = min(end, n - 1)
+            if start > end or n == 0:
+                writer.write(b"*0\r\n")
+            else:
+                subset = arr[start:end + 1]
+                resp = f"*{len(subset)}\r\n".encode()
+                for item in subset:
+                    resp += f"${len(item)}\r\n{item}\r\n".encode()
+                writer.write(resp)
+
+        # ---------------- LPOP ----------------
+        elif cmd == 'lpop':
+            key = elements[1]
+            if len(elements) == 2:
+                if lst[key]:
+                    element = lst[key].pop(0)
+                    writer.write(f"${len(element)}\r\n{element}\r\n".encode())
+                else:
+                    writer.write(b"$-1\r\n")
+            else:
+                count = int(elements[2])
+                popped = [lst[key].pop(0) for _ in range(min(count, len(lst[key])))]
+                if popped:
+                    resp = f"*{len(popped)}\r\n".encode()
+                    for item in popped:
+                        resp += f"${len(item)}\r\n{item}\r\n".encode()
+                    writer.write(resp)
+                else:
+                    writer.write(b"*0\r\n")
+
+        # ---------------- BLPOP ----------------
+        elif cmd == 'blpop':
+            key = elements[1]
+            timeout = float(elements[2])
+
+            # If the list has items, return immediately
+            if lst[key]:
+                element = lst[key].pop(0)
+                resp = (
+                    f"*2\r\n${len(key)}\r\n{key}\r\n"
+                    f"${len(element)}\r\n{element}\r\n"
+                ).encode()
+                writer.write(resp)
+                await writer.drain()
+            else:
+                # No elements → block
+                remove[key].append(writer)
+
+                async def unblock_after_timeout():
+                    if timeout != 0:
+                        await asyncio.sleep(timeout)
+                        # Still blocked? Unblock with nil
+                        if writer in remove[key]:
+                            remove[key].remove(writer)
+                            writer.write(b"*-1\r\n")
+                            await writer.drain()
+
+                asyncio.create_task(unblock_after_timeout())
+
+        elif cmd == 'type':
+            key = elements[1]
+            if key in streams:
+                writer.write(b"+stream\r\n")
+            elif key in d and d[key][1] >= time.time():
+                val = d[key][0]
+                if isinstance(val, str):
+                    typename = "string"
+                elif isinstance(val, list):
+                    typename = "list"
+                else:
+                    typename = "none"
+                writer.write(f"+{typename}\r\n".encode())
+            else:
+                writer.write(b"+none\r\n")
+
+        # ---------------- XADD ----------------
+        elif cmd == 'xadd':
+            global lastusedtime
+            if len(elements[2]) == 1:
+                t = time.time_ns() // 1000000
+                if t in lastusedseq:
+                    sequence = lastusedseq[t] + 1
+                else:
+                    sequence = 0
+            else:
+                t, sequence = elements[2].split('-')
+                t = int(t)
+
+                if sequence == "*":
+                    if t in lastusedseq:
+                        sequence = lastusedseq[t] + 1
+                    else:
+                        sequence = 0
+                        if t == 0:
+                            sequence += 1
+
+                sequence = int(sequence)
+            if sequence == '*':
+                writer.write(b"hell no")
+            elif t == sequence and t == 0:
+                writer.write(b'-ERR The ID specified in XADD must be greater than 0-0\r\n')
+            elif t < lastusedtime:
+                writer.write(b'-ERR The ID specified in XADD is equal or smaller than the target stream top item\r\n')
+            elif t == lastusedtime and sequence <= lastusedseq[lastusedtime]:
+                writer.write(b'-ERR The ID specified in XADD is equal or smaller than the target stream top item\r\n')
+            else:
+                lastusedtime = t
+                lastusedseq[lastusedtime] = sequence
+                streams[elements[1]][f"{t}-{sequence}"].append([elements[3], elements[4]])
+
+                writer.write(f"+{t}-{sequence}\r\n".encode())
+
+                # Check if any blocked XREAD clients need to be notified
+                if elements[1] in xread_zero_block and xread_zero_block[elements[1]]:
+                    blocked_data = xread_zero_block[elements[1]]
+                    if isinstance(blocked_data, list) and len(blocked_data) >= 2:
+                        blocked_start, blocked_writer = blocked_data
+                        key = elements[1]
+
+                        # Send new entry to blocked client
+                        entries = ""
+                        cnt = 0
+                        for k, v_list in streams[key].items():
+                            if k > blocked_start:  # only entries newer than given ID
+                                cnt += 1
+                                field_values = ""
+                                for fields in v_list:
+                                    field_values += f"*{len(fields)}\r\n"
+                                    for field in fields:
+                                        field_values += f"${len(field)}\r\n{field}\r\n"
+                                entries += f"*2\r\n${len(k)}\r\n{k}\r\n{field_values}"
+
+                        if cnt > 0:
+                            ans = f"*1\r\n*2\r\n${len(key)}\r\n{key}\r\n*{cnt}\r\n{entries}"
+                            blocked_writer.write(ans.encode())
+                            await blocked_writer.drain()
+
+                        # Remove from blocked list
+                        xread_zero_block[elements[1]] = []
+
+        # ---------------- XRANGE ----------------
+        elif cmd == 'xrange':
+            if len(elements) == 4 and elements[3] == '+':
+                key = elements[1]
+                start = elements[2]
+                ans = ''
+                cnt = 0
+                for k, v in streams[key].items():
+                    if start <= k:
+                        ans += "*2\r\n"
+                        ans += '$' + str(len(k)) + "\r\n" + k + "\r\n"
+                        cnt += 1
+                        ans += '*' + str(len(v) * 2) + '\r\n'
+                        for a, b in v:
+                            ans += '$' + str(len(a)) + '\r\n' + a + '\r\n'
+                            ans += '$' + str(len(b)) + '\r\n' + b + '\r\n'
+                ans = '*' + str(cnt) + '\r\n' + ans
+                writer.write(ans.encode())
+            else:
+                start, end = elements[2], elements[3]
+                key = elements[1]
+                ans = ''
+                cnt = 0
+                for k, v in streams[key].items():
+                    if start <= k <= end:
+                        ans += "*2\r\n"
+                        ans += '$' + str(len(k)) + "\r\n" + k + "\r\n"
+                        cnt += 1
+                        ans += '*' + str(len(v) * 2) + '\r\n'
+                        for a, b in v:
+                            ans += '$' + str(len(a)) + '\r\n' + a + '\r\n'
+                            ans += '$' + str(len(b)) + '\r\n' + b  + '\r\n'
+                ans = '*' + str(cnt) + '\r\n' + ans
+                writer.write(ans.encode())
+
+        # ---------------- XREAD ----------------
+        elif cmd == 'xread':
+            if elements[1].lower() == 'block':
+                timeout_ms = int(elements[2])
+                key = elements[4]
+                start = elements[5]
+
+                # Convert $ to current max ID
+                if start == '$':
+                    if key in streams and streams[key]:
+                        start = max(streams[key].keys())
+                    else:
+                        start = '0-0'
+
+                # FIRST: Check if entries already exist that are newer than start
+                new_entries = []
+                if key in streams and streams[key]:
+                    for entry_id, fields_list in streams[key].items():
+                        if entry_id > start:
+                            new_entries.append((entry_id, fields_list))
+
+                # If entries are available NOW, return them immediately
+                if new_entries:
+                    # Format and send the response immediately using existing logic
+                    entries = ""
+                    cnt = 0
+                    for k, v_list in new_entries:
+                        cnt += 1
+                        field_values = ""
+                        for fields in v_list:
+                            field_values += f"*{len(fields)}\r\n"
+                            for field in fields:
+                                field_values += f"${len(field)}\r\n{field}\r\n"
+                        entries += f"*2\r\n${len(k)}\r\n{k}\r\n{field_values}"
+
+                    response = f"*1\r\n*2\r\n${len(key)}\r\n{key}\r\n*{cnt}\r\n{entries}"
+                    writer.write(response.encode())
+                    await writer.drain()
+                    return
+
+                # Only wait if no entries are available
+                if timeout_ms == 0:
+                    xread_zero_block[key] = [start, writer]
+                    return
+
+                # Create timeout task only when we actually need to wait
+                async def unblock_after_timeout():
+                    await asyncio.sleep(timeout_ms / 1000)
+
+                    # Check for new entries again after timeout
+                    final_entries = []
+                    if key in streams and streams[key]:
+                        for entry_id, fields_list in streams[key].items():
+                            if entry_id > start:
+                                final_entries.append((entry_id, fields_list))
+
+                    if final_entries:
+                        # Format the response
+                        entries = ""
+                        cnt = 0
+                        for k, v_list in final_entries:
+                            cnt += 1
+                            field_values = ""
+                            for fields in v_list:
+                                field_values += f"*{len(fields)}\r\n"
+                                for field in fields:
+                                    field_values += f"${len(field)}\r\n{field}\r\n"
+                            entries += f"*2\r\n${len(k)}\r\n{k}\r\n{field_values}"
+
+                        response = f"*1\r\n*2\r\n${len(key)}\r\n{key}\r\n*{cnt}\r\n{entries}"
+                    else:
+                        response = "*-1\r\n"  # Null response
+
+                    writer.write(response.encode())
+                    await writer.drain()
+
+                asyncio.create_task(unblock_after_timeout())
 
             else:
-                _, rest = args[0], args[1:]
-                print(f" _ = {_} and rest = {rest}")
-                sz = len(rest)//2
-                strs, ids = rest[:sz], rest[sz:]
-                print(f"DOING XREAD WITH {strs} AND {ids}")
-                resp = [] 
-                for s in range(sz):
-                    res = self.data_handler.handle_xread(strs[s], ids[s])
-                    resp.append(res)
-                conn.sendall(self.builder.resp_array(resp).encode())
-        except Exception as e:
-            print(e)
-            conn.sendall(self.builder.error(e).encode())
+                total = len(elements[2:])
+                half = total // 2
+                keys = elements[2:2 + half]
+                starts = elements[2 + half:]
+                ans = f"*{len(keys)}\r\n"  # Top-level array contains all streams
 
-    def handle_xrange(self, conn, args):
-        key, lid, hid = args[0], args[1], args[2]
-        try:
-            res = self.data_handler.handle_xrange(key, lid, hid)
-            conn.sendall(self.builder.resp_array(res).encode())
-        except Exception as e:
-            print(e)
-            print(traceback.format_exc())
-            conn.sendall(self.builder.error(e).encode())
+                for idx, key in enumerate(keys):
+                    start = starts[idx]
+                    entries = ""
+                    cnt = 0
+
+                    if key in streams:
+                        for k, v_list in streams[key].items():
+                            if start < k:
+                                cnt += 1
+                                # Flatten all field-value pairs for this entry
+                                field_values = ""
+                                for fields in v_list:
+                                    field_values += f"*{len(fields)}\r\n"
+                                    for field in fields:
+                                        field_values += f"${len(field)}\r\n{field}\r\n"
+                                entries += f"*2\r\n${len(k)}\r\n{k}\r\n{field_values}"
+
+                    ans += f"*2\r\n${len(key)}\r\n{key}\r\n*{cnt}\r\n{entries}"
+
+                writer.write(ans.encode())
+                await writer.drain()
+
+        # ---------------- UNKNOWN ----------------
+        else:
+            writer.write(b"-ERR unknown command\r\n")
+
+        await writer.drain()
+
+    writer.close()
+    await writer.wait_closed()
 
 
-    def handle_type(self, conn, args):
-        try:
-            key = args[0]
-            if key in self.data_handler:
-                conn.sendall(self.data_handler[key].type.encode())
-            else:
-                conn.sendall(self.builder.NONE.encode())
-        except Exception as e:
-            print(traceback.format_exc())
-            conn.sendall(self.builder.NULL_BULK_STR.encode())
+async def main():
+    server = await asyncio.start_server(handle_command, "localhost", 6379)
+    print("Async Redis clone running on ('localhost', 6379)")
+    async with server:
+        await server.serve_forever()
 
-    def handle_get(self, conn, args):
-        try:
-            key = args[0]
-            val = self.data_handler.handle_get(key)
-            if val is None:
-                return conn.sendall(self.builder.NULL_BULK_STR.encode())
-            resp = self.builder.bulk_str(val)
-            conn.sendall(resp.encode())
-        except Exception as e:
-            print(traceback.format_exc())
-            conn.sendall(self.builder.NULL_BULK_STR.encode())
+
+if __name__ == "__main__":
+    asyncio.run(main())
