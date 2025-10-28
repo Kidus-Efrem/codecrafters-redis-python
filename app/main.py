@@ -12,6 +12,8 @@ streams = defaultdict(lambda: defaultdict(list))
 lastusedtime = 0
 lastusedseq = defaultdict(int)
 xread_zero_block = defaultdict(list)
+multi = False
+multi_deque = deque()
 
 
 async def handle_command(reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
@@ -41,9 +43,11 @@ async def handle_command(reader: asyncio.StreamReader, writer: asyncio.StreamWri
 
         print(elements)
         cmd = elements[0].lower()
+        if multi == True:
 
+            multi_deque.append(elements)
         # ---------------- PING ----------------
-        if cmd == 'ping':
+        elif cmd == 'ping':
             writer.write(b"+PONG\r\n")
 
         # ---------------- ECHO ----------------
@@ -459,6 +463,10 @@ async def handle_command(reader: asyncio.StreamReader, writer: asyncio.StreamWri
                 writer.write(b":1\r\n")
 
             # d[key] = (value, expiry)
+        elif cmd == 'multi':
+            multi = True
+            writer.write("+OK\r\n")
+
 
         # ---------------- UNKNOWN ----------------
         else:
@@ -468,6 +476,7 @@ async def handle_command(reader: asyncio.StreamReader, writer: asyncio.StreamWri
 
     writer.close()
     await writer.wait_closed()
+
 
 
 async def main():
