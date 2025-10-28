@@ -59,7 +59,7 @@ async def handle_command(reader: asyncio.StreamReader, writer: asyncio.StreamWri
             if len(elements) >= 5 and elements[3].upper() == 'PX':
                 expiry = time.time() + int(elements[4]) / 1000
 
-            d[key] = (value, expiry)
+            d[key] = [int(value), expiry]
             writer.write(b"+OK\r\n")
 
         # ---------------- GET ----------------
@@ -439,7 +439,7 @@ async def handle_command(reader: asyncio.StreamReader, writer: asyncio.StreamWri
             # expiry = float('inf')
 
             if key in d:
-                d[key][0]= str(int(d[key][0])+1)
+                d[key][0]+=1
                 writer.write(b":"+str(d[key][0]).encdode + b"\r\n")
 
 
@@ -450,7 +450,7 @@ async def handle_command(reader: asyncio.StreamReader, writer: asyncio.StreamWri
                 if len(elements) >= 5 and elements[3].upper() == 'PX':
                     expiry = time.time() + int(elements[4]) / 1000
 
-                d[key] = (value, expiry)
+                d[key] = [value, expiry]
                 writer.write(b"+OK\r\n")
 
             # d[key] = (value, expiry)
