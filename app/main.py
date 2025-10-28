@@ -632,7 +632,7 @@ async def handle_command(reader: asyncio.StreamReader, writer: asyncio.StreamWri
 
                         # ---------------- XADD ----------------
                         elif cmd == 'xadd':
-                            global lastusedtime
+                            # global lastusedtime
                             stream_key = elements[1]
                             entry_id = elements[2]
 
