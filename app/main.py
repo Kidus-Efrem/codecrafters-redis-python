@@ -441,7 +441,7 @@ async def handle_command(reader: asyncio.StreamReader, writer: asyncio.StreamWri
             # expiry = float('inf')
 
             if key in d:
-                if isinstance( d[key], int):
+                if isinstance( d[key][0], int):
                     d[key][0]+=1
                     writer.write(b":"+str(d[key][0]).encode() + b"\r\n")
                 else:
