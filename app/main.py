@@ -222,8 +222,9 @@ async def handle_command(reader: asyncio.StreamReader, writer: asyncio.StreamWri
                     # Partial auto-generation (timestamp provided, sequence auto)
                     if t in lastusedseq:
                         sequence = lastusedseq[t] + 1
-                    elif t == 0:
-	                    sequence =1
+                    elif t== 0:
+                        squence = 1
+
                     else:
                         sequence = 0
                     final_id = f"{t}-{sequence}"
@@ -433,6 +434,26 @@ async def handle_command(reader: asyncio.StreamReader, writer: asyncio.StreamWri
 
                 writer.write(ans.encode())
                 await writer.drain()
+        elif cmd == 'incr':
+            key, value = elements[1], elements[2]
+            # expiry = float('inf')
+
+            if key in d:
+                d[key]+=1
+                writer.write(b":"+str(d[key]).encdode + b"\r\n")
+
+
+            else:
+                # key, value = elements[1], elements[2]
+                expiry = float('inf')
+
+                if len(elements) >= 5 and elements[3].upper() == 'PX':
+                    expiry = time.time() + int(elements[4]) / 1000
+
+                d[key] = (value, expiry)
+                writer.write(b"+OK\r\n")
+
+            # d[key] = (value, expiry)
 
         # ---------------- UNKNOWN ----------------
         else:
