@@ -445,7 +445,7 @@ async def handle_command(reader: asyncio.StreamReader, writer: asyncio.StreamWri
                     d[key][0]+=1
                     writer.write(b":"+str(d[key][0]).encode() + b"\r\n")
                 else:
-                    writer.write(b"-ERR value is not an integer or out of range")
+                    writer.write(b"-ERR value is not an integer or out of range\r\n")
 
 
             else:
