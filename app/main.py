@@ -176,7 +176,7 @@ class RequestHandler:
                 if ms != 0:
                     time.sleep(ms//1000)
                     conn.sendall(self.builder.NULL_ARRAY.encode())
-                    print(f"TIMER PASSED SENDING EMPTY ARRAY")
+                    print(f"TIMER PASSED SENDING EMPTY ARRAY") 
                     del self.server.xread_blocks[key][idx]
 
             else:
