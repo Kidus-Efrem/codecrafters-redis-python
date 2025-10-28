@@ -49,7 +49,7 @@ async def handle_command(reader: asyncio.StreamReader, writer: asyncio.StreamWri
             writer.write(b'QUEUED\r\n')
         # ---------------- PING ----------------
         elif cmd == 'ping':
-            writer.write(b"+PONG\r\n")
+            writer.write(b"+PONG\r\n") 
 
         # ---------------- ECHO ----------------
         elif cmd == 'echo':
