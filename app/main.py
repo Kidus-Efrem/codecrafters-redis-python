@@ -222,6 +222,8 @@ async def handle_command(reader: asyncio.StreamReader, writer: asyncio.StreamWri
                     # Partial auto-generation (timestamp provided, sequence auto)
                     if t in lastusedseq:
                         sequence = lastusedseq[t] + 1
+                    elif t == 0:
+	                    sequence =1
                     else:
                         sequence = 0
                     final_id = f"{t}-{sequence}"
