@@ -41,7 +41,7 @@ async def handle_command(reader: asyncio.StreamReader, writer: asyncio.StreamWri
                 i += wlen + 2
                 elements.append(element.decode())
 
-        print(elements)
+        # print(elements)
         cmd = elements[0].lower()
         if multi == True:
 
@@ -467,6 +467,10 @@ async def handle_command(reader: asyncio.StreamReader, writer: asyncio.StreamWri
         elif cmd == 'multi':
             multi = True
             writer.write(b"+OK\r\n")
+        elif cmd == 'exec':
+            if not multi:
+                writer.write(b'-ERR EXEC WITHOUT MULTI\r\n')
+
 
 
         # ---------------- UNKNOWN ----------------
