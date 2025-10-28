@@ -451,7 +451,7 @@ async def handle_command(reader: asyncio.StreamReader, writer: asyncio.StreamWri
                     expiry = time.time() + int(elements[4]) / 1000
 
                 d[key] = [value, expiry]
-                writer.write(b"1\r\n")
+                writer.write(b":1\r\n")
 
             # d[key] = (value, expiry)
 
