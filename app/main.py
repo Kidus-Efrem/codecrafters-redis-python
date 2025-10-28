@@ -198,7 +198,7 @@ async def handle_command(reader: asyncio.StreamReader, writer: asyncio.StreamWri
         elif cmd == 'xadd':
             global lastusedtime
             stream_key = elements[1]
-            entry_id = elements[2]
+            entry_id = elements[2] 
 
             # Parse or generate entry ID
             if entry_id == '*':
