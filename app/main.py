@@ -43,7 +43,7 @@ async def handle_command(reader: asyncio.StreamReader, writer: asyncio.StreamWri
 
         # print(elements)
         cmd = elements[0].lower()
-        if multi == True:
+        if multi == True and cmd != 'exec':
 
             multi_deque.append(elements)
             writer.write(b'QUEUED\r\n')
@@ -485,7 +485,7 @@ async def handle_command(reader: asyncio.StreamReader, writer: asyncio.StreamWri
 
     writer.close()
     await writer.wait_closed()
- 
+
 
 
 async def main():
