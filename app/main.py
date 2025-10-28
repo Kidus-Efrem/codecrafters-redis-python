@@ -30,7 +30,7 @@ async def handle_command(reader: asyncio.StreamReader, writer: asyncio.StreamWri
             j = chunk.find(b'\r\n', i)
             arrlen = int(chunk[i:j])
         i = j + 2
-        elements = [] 
+        elements = []
         for _ in range(arrlen):
             if chunk[i] == ord('$'):
                 i += 1
@@ -45,7 +45,7 @@ async def handle_command(reader: asyncio.StreamReader, writer: asyncio.StreamWri
         cmd = elements[0].lower()
         if multi == True and cmd != 'exec':
 
-            multi_deque.append(elements)
+            multi_deque.append(elements) 
             writer.write(b'+QUEUED\r\n')
         # ---------------- PING ----------------
         elif cmd == 'ping':
