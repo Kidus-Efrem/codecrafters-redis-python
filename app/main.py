@@ -435,7 +435,7 @@ async def handle_command(reader: asyncio.StreamReader, writer: asyncio.StreamWri
                 writer.write(ans.encode())
                 await writer.drain()
         elif cmd == 'incr':
-            key, value = elements[1], elements[2]
+            key, value = elements[1],1
             # expiry = float('inf')
 
             if key in d:
