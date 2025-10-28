@@ -71,7 +71,9 @@ async def handle_command(reader: asyncio.StreamReader, writer: asyncio.StreamWri
                     del d[key]
                     writer.write(b"$-1\r\n")
                 else:
-                    writer.write(f"${len(val)}\r\n{val}\r\n".encode())
+                    x = len(str(val))
+
+                    writer.write(f"${x}\r\n{val}\r\n".encode())
             else:
                 writer.write(b"$-1\r\n")
 
