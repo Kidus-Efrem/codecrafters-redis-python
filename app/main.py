@@ -59,7 +59,7 @@ async def handle_command(reader: asyncio.StreamReader, writer: asyncio.StreamWri
             if len(elements) >= 5 and elements[3].upper() == 'PX':
                 expiry = time.time() + int(elements[4]) / 1000
 
-            d[key] = [int(value), expiry]
+            d[key] = [int(value) if value.isdigit() else value, expiry]
             writer.write(b"+OK\r\n")
 
         # ---------------- GET ----------------
