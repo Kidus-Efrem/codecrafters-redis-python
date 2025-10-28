@@ -238,7 +238,7 @@ async def handle_command(reader: asyncio.StreamReader, writer: asyncio.StreamWri
             lastusedtime = t
             lastusedseq[lastusedtime] = sequence
             final_id = f"{t}-{sequence}"
-            streams[stream_key][final_id].append([elements[3], elements[4]])
+            streams[stream_key][final_id].append(elements[3:])
 
             writer.write(f"+{final_id}\r\n".encode())
             await writer.drain()
