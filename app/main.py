@@ -201,7 +201,15 @@ async def handle_command(reader: asyncio.StreamReader, writer: asyncio.StreamWri
             entry_id = elements[2]
 
             # Parse or generate entry ID
-            if '-' in entry_id:
+            if entry_id == '*':
+                # Fully auto-generated ID
+                t = time.time_ns() // 1000000
+                if t in lastusedseq:
+                    sequence = lastusedseq[t] + 1
+                else:
+                    sequence = 0
+                final_id = f"{t}-{sequence}"
+            elif '-' in entry_id:
                 t_str, seq_str = entry_id.split('-')
                 if t_str == '0':
                     t = 0
@@ -209,12 +217,16 @@ async def handle_command(reader: asyncio.StreamReader, writer: asyncio.StreamWri
                     t = int(t_str) if t_str != '*' else time.time_ns() // 1000000
 
                 if seq_str == '*':
+                    # Partial auto-generation (timestamp provided, sequence auto)
                     if t in lastusedseq:
                         sequence = lastusedseq[t] + 1
                     else:
                         sequence = 0
+                    final_id = f"{t}-{sequence}"
                 else:
+                    # Fully specified ID
                     sequence = int(seq_str)
+                    final_id = entry_id
             else:
                 # Handle case where ID doesn't have '-'
                 t = time.time_ns() // 1000000
@@ -222,6 +234,7 @@ async def handle_command(reader: asyncio.StreamReader, writer: asyncio.StreamWri
                     sequence = lastusedseq[t] + 1
                 else:
                     sequence = 0
+                final_id = f"{t}-{sequence}"
 
             # Validate the ID
             if t == 0 and sequence == 0:
@@ -237,10 +250,11 @@ async def handle_command(reader: asyncio.StreamReader, writer: asyncio.StreamWri
             # Store the entry
             lastusedtime = t
             lastusedseq[lastusedtime] = sequence
-            final_id = f"{t}-{sequence}"
             streams[stream_key][final_id].append(elements[3:])
 
-            writer.write(f"+{final_id}\r\n".encode())
+            # Return as BULK STRING ($) not SIMPLE STRING (+)
+            response = f"${len(final_id)}\r\n{final_id}\r\n"
+            writer.write(response.encode())
             await writer.drain()
 
             # Check if any blocked XREAD clients need to be notified
