@@ -76,7 +76,7 @@ async def handle_command(reader: asyncio.StreamReader, writer: asyncio.StreamWri
                 writer.write(b"$-1\r\n")
 
         # ---------------- RPUSH ----------------
-        elif cmd == 'rpush':
+        elif cmd == 'rpush': 
             key = elements[1]
             for v in elements[2:]:
                 lst[key].append(v)
