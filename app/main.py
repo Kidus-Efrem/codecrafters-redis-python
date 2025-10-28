@@ -439,7 +439,7 @@ async def handle_command(reader: asyncio.StreamReader, writer: asyncio.StreamWri
             # expiry = float('inf')
 
             if key in d:
-                d[key][0]+=1
+                d[key][0]= str(int(d[key][0])+1)
                 writer.write(b":"+str(d[key][0]).encdode + b"\r\n")
 
 
@@ -463,7 +463,7 @@ async def handle_command(reader: asyncio.StreamReader, writer: asyncio.StreamWri
 
     writer.close()
     await writer.wait_closed()
- 
+
 
 async def main():
     server = await asyncio.start_server(handle_command, "localhost", 6379)
