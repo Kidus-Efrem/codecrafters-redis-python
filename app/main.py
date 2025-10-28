@@ -30,7 +30,7 @@ async def handle_command(reader: asyncio.StreamReader, writer: asyncio.StreamWri
             j = chunk.find(b'\r\n', i)
             arrlen = int(chunk[i:j])
         i = j + 2
-        elements = []
+        elements = [] 
         for _ in range(arrlen):
             if chunk[i] == ord('$'):
                 i += 1
