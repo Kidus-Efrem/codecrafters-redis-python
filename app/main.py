@@ -46,11 +46,11 @@ async def handle_command(reader: asyncio.StreamReader, writer: asyncio.StreamWri
         if multi == True and cmd != 'exec':
 
             multi_deque.append(elements)
-            writer.write(b'QUEUED\r\n')
+            writer.write(b'+QUEUED\r\n')
         # ---------------- PING ----------------
         elif cmd == 'ping':
             writer.write(b"+PONG\r\n")
- 
+
         # ---------------- ECHO ----------------
         elif cmd == 'echo':
             msg = elements[1]
