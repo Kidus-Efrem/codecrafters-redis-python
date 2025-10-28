@@ -223,7 +223,7 @@ async def handle_command(reader: asyncio.StreamReader, writer: asyncio.StreamWri
                     if t in lastusedseq:
                         sequence = lastusedseq[t] + 1
                     elif t== 0:
-                        squence = 1
+                        sequence = 1
 
                     else:
                         sequence = 0
