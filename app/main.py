@@ -519,7 +519,7 @@ async def handle_command(reader: asyncio.StreamReader, writer: asyncio.StreamWri
         cmd = elements[0].lower()
 
         # Handle MULTI transaction mode
-        if cmd == 'dicsard':
+        if cmd == 'discard':
             result = await execute_command(elements, writer)
         elif writer in multi_con and cmd != 'exec' and cmd != 'multi':
             multi_deque.append(elements)
