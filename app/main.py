@@ -404,6 +404,13 @@ async def handle_incr(elements):
 async def handle_multi(writer):
     multi_con.append(writer)
     return b"+OK\r\n"
+async def handle_discard(writer):
+    if writer in multi_con:
+        multi_con.remove(writer)
+        return b'+OK\r\n'
+    else:
+        return b'-ERR DISCARD without MULTI\r\n'
+
 
 async def handle_exec(writer):
     if writer not in multi_con:
@@ -466,11 +473,12 @@ async def execute_command(elements, writer):
         'blpop': lambda e: handle_blpop(e, writer),
         'type': handle_type,
         'xadd': lambda e: handle_xadd(e, writer),
-        'xrange': handle_xrange,
+        'xrange': handle_xrange, 
         'xread': lambda e: handle_xread(e, writer),
         'incr': handle_incr,
         'multi': lambda e: handle_multi(writer),
-        'exec': lambda e: handle_exec(writer)
+        'exec': lambda e: handle_exec(writer),
+        'discard': lambda e: handle_exec(writer)
     }
 
     if cmd in command_handlers:
