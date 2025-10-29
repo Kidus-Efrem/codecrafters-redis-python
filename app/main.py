@@ -541,11 +541,20 @@ async def handle_command(reader: asyncio.StreamReader, writer: asyncio.StreamWri
     writer.close()
     await writer.wait_closed()
 
-async def main():
-    server = await asyncio.start_server(handle_command, "localhost", 6379)
+async def main(port = 6379):
+    server = await asyncio.start_server(handle_command, "localhost", port)
     print("Async Redis clone running on ('localhost', 6379)")
     async with server:
         await server.serve_forever()
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    port = 6379
+    args = sys.argv[1:]
+    i= 0
+    while i < len(args):
+        if args[i] == "--port" and i +1 < len(args):
+            port = int(args[i+1])
+            i+=2
+        else:
+            i+=1
+    asyncio.run(main(port))
