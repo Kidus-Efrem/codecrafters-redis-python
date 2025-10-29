@@ -1,4 +1,5 @@
 import asyncio
+import sys
 import time
 from collections import defaultdict, deque
 
@@ -548,6 +549,7 @@ async def main(port = 6379):
         await server.serve_forever()
 
 if __name__ == "__main__":
+    import sys
     port = 6379
     args = sys.argv[1:]
     i= 0
