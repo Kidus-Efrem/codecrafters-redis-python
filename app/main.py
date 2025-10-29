@@ -473,7 +473,7 @@ async def execute_command(elements, writer):
         'blpop': lambda e: handle_blpop(e, writer),
         'type': handle_type,
         'xadd': lambda e: handle_xadd(e, writer),
-        'xrange': handle_xrange, 
+        'xrange': handle_xrange,
         'xread': lambda e: handle_xread(e, writer),
         'incr': handle_incr,
         'multi': lambda e: handle_multi(writer),
@@ -519,7 +519,9 @@ async def handle_command(reader: asyncio.StreamReader, writer: asyncio.StreamWri
         cmd = elements[0].lower()
 
         # Handle MULTI transaction mode
-        if writer in multi_con and cmd != 'exec' and cmd != 'multi':
+        if cmd == 'disard':
+            result = await execute_command(elements, writer)
+        elif writer in multi_con and cmd != 'exec' and cmd != 'multi':
             multi_deque.append(elements)
             result = b'+QUEUED\r\n'
         else:
