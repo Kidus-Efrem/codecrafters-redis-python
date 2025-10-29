@@ -13,7 +13,8 @@ lastusedtime = 0
 lastusedseq = defaultdict(int)
 xread_zero_block = defaultdict(list)
 multi_con = []
-multi_deque = deque()
+# multi_deque = deque()
+multi_deques = defaultdict(deque)
 
 # Command handler functions that return results instead of writing to client
 async def handle_ping(elements):
@@ -403,11 +404,12 @@ async def handle_incr(elements):
 
 async def handle_multi(writer):
     multi_con.append(writer)
+    # multi_deques[str(writer)]
     return b"+OK\r\n"
 async def handle_discard(writer):
     if writer in multi_con:
         multi_con.remove(writer)
-        multi_deque.clear()
+        multi_deques[str(writer)].clear()
         return b'+OK\r\n'
     else:
         return b'-ERR DISCARD without MULTI\r\n'
@@ -418,17 +420,17 @@ async def handle_exec(writer):
         return b'-ERR EXEC without MULTI\r\n'
     else:
         multi_con.remove(writer)
-        if not multi_deque:
+        if not multi_deques[str(writer)]:
             return b'*0\r\n'
         else:
             results = []
-            for queued_elements in multi_deque:
+            for queued_elements in multi_deques[str(writer)]:
                 result = await execute_command(queued_elements, writer)
                 if result is not None:  # Only include commands that have immediate responses
                     results.append(result)
 
             # Clear the multi deque after execution
-            multi_deque.clear()
+            multi_deques[str(writer)].clear()
 
             # Format results as RESP array
             if not results:
@@ -525,7 +527,7 @@ async def handle_command(reader: asyncio.StreamReader, writer: asyncio.StreamWri
             writer.write(result)
             result = None
         elif writer in multi_con and cmd != 'exec' and cmd != 'multi':
-            multi_deque.append(elements)
+            multi_deques[str(writer)].append(elements)
             result = b'+QUEUED\r\n'
         else:
             result = await execute_command(elements, writer)
