@@ -407,6 +407,7 @@ async def handle_multi(writer):
 async def handle_discard(writer):
     if writer in multi_con:
         multi_con.remove(writer)
+        multi_deque.clear()
         return b'+OK\r\n'
     else:
         return b'-ERR DISCARD without MULTI\r\n'
