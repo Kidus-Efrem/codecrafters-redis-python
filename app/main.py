@@ -479,7 +479,7 @@ async def execute_command(elements, writer):
         'incr': handle_incr,
         'multi': lambda e: handle_multi(writer),
         'exec': lambda e: handle_exec(writer),
-        'discard': lambda e: handle_exec(writer)
+        'discard': lambda e: handle_discard(writer)
     }
 
     if cmd in command_handlers:
